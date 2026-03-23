@@ -1,0 +1,22 @@
+{
+  "name": "docai",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:extension": "npm run dev --workspace=apps/extension",
+    "dev:dashboard": "npm run dev --workspace=apps/dashboard",
+    "dev:backend": "npm run dev --workspace=backend",
+    "build:extension": "npm run build --workspace=apps/extension",
+    "build:dashboard": "npm run build --workspace=apps/dashboard",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  }
+}
