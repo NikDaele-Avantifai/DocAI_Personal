@@ -18,5 +18,9 @@
   "engines": {
     "node": ">=20.0.0",
     "npm": ">=10.0.0"
+  },
+  "dependencies": {
+    "plasmo": "^0.90.5",
+    "react": "^18.3.1"
   }
 }

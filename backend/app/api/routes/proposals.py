@@ -4,6 +4,8 @@ from typing import Literal
 import uuid
 from datetime import datetime
 
+from app.services.confluence_service import ConfluenceService
+
 router = APIRouter()
 
 # In-memory store for now — replace with PostgreSQL in next phase
@@ -72,3 +74,66 @@ async def get_proposal(proposal_id: str):
     if proposal_id not in _proposals:
         raise HTTPException(status_code=404, detail="Proposal not found")
     return _proposals[proposal_id]
+
+
+class ApplyProposalRequest(BaseModel):
+    confluence_base_url: str
+    email: str
+    api_token: str
+    applied_by: str = "Dashboard User"
+
+
+@router.post("/{proposal_id}/apply")
+async def apply_proposal(proposal_id: str, body: ApplyProposalRequest):
+    """
+    Apply an approved proposal to Confluence via the REST API.
+    Requires the user to supply Confluence credentials (never stored server-side).
+    """
+    if proposal_id not in _proposals:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+
+    proposal = _proposals[proposal_id]
+    if proposal["status"] not in ("approved", "pending"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot apply a proposal with status '{proposal['status']}'",
+        )
+
+    svc = ConfluenceService(
+        base_url=body.confluence_base_url,
+        api_token=body.api_token,
+        email=body.email,
+    )
+
+    action = proposal.get("action")
+
+    try:
+        if action == "archive":
+            await svc.archive_page(proposal["source_page_id"])
+        else:
+            new_content = proposal.get("new_content")
+            if not new_content:
+                raise HTTPException(
+                    status_code=400,
+                    detail="This proposal has no generated content to apply. Use /api/edit/generate first.",
+                )
+            page_version = proposal.get("page_version", 1)
+            await svc.update_page(
+                page_id=proposal["source_page_id"],
+                title=proposal["source_page_title"],
+                body=new_content,
+                current_version=page_version,
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Confluence API error: {exc}",
+        )
+
+    proposal["status"] = "applied"
+    proposal["applied_at"] = datetime.utcnow().isoformat()
+    proposal["applied_by"] = body.applied_by
+
+    return {"success": True, "message": "Changes applied to Confluence successfully.", "proposal": proposal}

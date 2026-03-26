@@ -66,6 +66,7 @@ class ConfluenceService:
         title: str,
         body: str,
         current_version: int,
+        representation: str = "wiki",
     ) -> dict[str, Any]:
         payload = {
             "version": {"number": current_version + 1},
@@ -74,7 +75,7 @@ class ConfluenceService:
             "body": {
                 "storage": {
                     "value": body,
-                    "representation": "storage",
+                    "representation": representation,
                 }
             },
         }
@@ -87,6 +88,41 @@ class ConfluenceService:
             )
             response.raise_for_status()
             return response.json()
+
+    async def get_all_pages_in_space(self, space_key: str) -> list[dict[str, Any]]:
+        """
+        Fetch ALL pages in a space handling Confluence pagination.
+        Expands version, history, and ancestors so we can build parent/child trees.
+        """
+        all_pages: list[dict[str, Any]] = []
+        start = 0
+        limit = 100
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            while True:
+                response = await client.get(
+                    f"{self.base_url}/wiki/rest/api/content",
+                    auth=self._auth,
+                    params={
+                        "spaceKey": space_key,
+                        "type": "page",
+                        "status": "current",
+                        "limit": limit,
+                        "start": start,
+                        "expand": "version,history,ancestors,metadata.labels",
+                    },
+                    headers={"Accept": "application/json"},
+                )
+                response.raise_for_status()
+                data = response.json()
+                results: list[dict[str, Any]] = data.get("results", [])
+                all_pages.extend(results)
+
+                if len(results) < limit:
+                    break
+                start += limit
+
+        return all_pages
 
     async def archive_page(self, page_id: str) -> bool:
         """Move a page to the archive by updating its status."""
