@@ -1,36 +1,95 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import "./DashboardPage.css"
 
-const stats = [
-  { label: "Pages Analyzed",  value: "1",  delta: "today",   color: "#5B73FF" },
-  { label: "Issues Found",    value: "4",  delta: "active",   color: "#FF5566" },
-  { label: "High Priority",   value: "2",  delta: "urgent",   color: "#FFB547" },
-  { label: "Pages Healthy",   value: "0",  delta: "clean",    color: "#34D399" },
-]
+const API_BASE = "http://localhost:8000"
 
-const activity = [
-  { time: "Just now",   page: "Q3 2021 Sprint Retrospective", action: "Analyzed", issues: 4, severity: "high"   },
-  { time: "2m ago",     page: "API Integration Guide",        action: "Analyzed", issues: 3, severity: "high"   },
-  { time: "5m ago",     page: "Customer Onboarding Process",  action: "Analyzed", issues: 2, severity: "medium" },
-  { time: "8m ago",     page: "Team Handbook 2024",           action: "Analyzed", issues: 0, severity: "none"   },
-]
-
-const SEV_COLOR: Record<string, string> = {
-  high:   "#FF5566",
-  medium: "#FFB547",
-  low:    "#818CF8",
-  none:   "#34D399",
+type ActivityEntry = {
+  id: string
+  page_title: string
+  space_key: string | null
+  action: string
+  decision: string
+  reviewed_by: string | null
+  updated_at: string | null
 }
 
-const SEV_BG: Record<string, string> = {
-  high:   "rgba(255,85,102,0.1)",
-  medium: "rgba(255,181,71,0.1)",
-  low:    "rgba(129,140,248,0.1)",
-  none:   "rgba(52,211,153,0.1)",
+type Stats = {
+  pages_total: number
+  spaces_total: number
+  proposals_pending: number
+  proposals_awaiting_apply: number
+  changes_applied: number
+  decisions_made: number
+  recent_activity: ActivityEntry[]
+}
+
+const ACTION_LABEL: Record<string, string> = {
+  archive:        "Archive",
+  add_summary:    "Add Summary",
+  update_owner:   "Update Owner",
+  restructure:    "Restructure",
+  merge:          "Merge",
+  rewrite:        "Rewrite",
+  remove_section: "Remove Section",
+}
+
+const DECISION_STYLE: Record<string, { color: string; bg: string; icon: string }> = {
+  approved: { color: "#006644", bg: "rgba(0,102,68,0.08)",  icon: "✓" },
+  rejected: { color: "#BF2600", bg: "rgba(191,38,0,0.08)",  icon: "✕" },
+  applied:  { color: "#0747A6", bg: "rgba(7,71,166,0.08)",  icon: "↗" },
+}
+
+function relativeTime(iso: string | null): string {
+  if (!iso) return ""
+  const diff = Date.now() - new Date(iso).getTime()
+  const m = Math.floor(diff / 60000)
+  if (m < 1) return "just now"
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  return `${Math.floor(h / 24)}d ago`
 }
 
 export default function DashboardPage() {
-  const [hoveredRow, setHoveredRow] = useState<number | null>(null)
+  const [stats, setStats] = useState<Stats | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/stats/`)
+      .then(r => r.json())
+      .then(setStats)
+      .catch(() => setStats(null))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const statCards = stats
+    ? [
+        {
+          label: "Pages Synced",
+          value: stats.pages_total,
+          delta: `across ${stats.spaces_total} space${stats.spaces_total !== 1 ? "s" : ""}`,
+          color: "#5B73FF",
+        },
+        {
+          label: "Pending Reviews",
+          value: stats.proposals_pending,
+          delta: "awaiting decision",
+          color: "#FFB547",
+        },
+        {
+          label: "Awaiting Apply",
+          value: stats.proposals_awaiting_apply,
+          delta: "approved, not yet live",
+          color: "#818CF8",
+        },
+        {
+          label: "Changes Applied",
+          value: stats.changes_applied,
+          delta: "published to Confluence",
+          color: "#34D399",
+        },
+      ]
+    : []
 
   return (
     <div className="dashboard">
@@ -42,96 +101,131 @@ export default function DashboardPage() {
         </div>
         <div className="header-actions">
           <div className="last-scan">
-            <div className="scan-dot" />
-            <span>Last scan: just now</span>
+            <div className={`scan-dot${loading ? " pulsing" : ""}`} />
+            <span>{loading ? "Loading…" : "Live"}</span>
           </div>
         </div>
       </div>
 
       {/* Stats */}
       <div className="stats-grid">
-        {stats.map((s, i) => (
-          <div className="stat-card" key={i}>
-            <div className="stat-accent" style={{ background: s.color }} />
-            <div className="stat-value" style={{ color: s.color }}>{s.value}</div>
-            <div className="stat-label">{s.label}</div>
-            <div className="stat-delta">{s.delta}</div>
-          </div>
-        ))}
+        {loading
+          ? Array.from({ length: 4 }).map((_, i) => (
+              <div className="stat-card" key={i}>
+                <div className="stat-accent" style={{ background: "var(--border-2)" }} />
+                <div className="skel-block skel-val" />
+                <div className="skel-block skel-lbl" />
+                <div className="skel-block skel-dlt" />
+              </div>
+            ))
+          : statCards.map((s, i) => (
+              <div className="stat-card" key={i}>
+                <div className="stat-accent" style={{ background: s.color }} />
+                <div className="stat-value" style={{ color: s.color }}>{s.value}</div>
+                <div className="stat-label">{s.label}</div>
+                <div className="stat-delta">{s.delta}</div>
+              </div>
+            ))}
       </div>
 
       {/* Content grid */}
       <div className="content-grid">
 
-        {/* Activity log */}
+        {/* Recent activity */}
         <div className="card">
           <div className="card-header">
             <div>
               <h2 className="card-title">Recent Activity</h2>
-              <p className="card-sub">Pages analyzed in this session</p>
+              <p className="card-sub">Latest decisions from the approval workflow</p>
             </div>
-            <span className="card-badge">{activity.length} pages</span>
+            {stats && (
+              <span className="card-badge">{stats.decisions_made} total</span>
+            )}
           </div>
 
           <div className="activity-list">
-            {activity.map((item, i) => (
-              <div
-                key={i}
-                className={`activity-row${hoveredRow === i ? " hovered" : ""}`}
-                onMouseEnter={() => setHoveredRow(i)}
-                onMouseLeave={() => setHoveredRow(null)}>
+            {loading && Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="activity-row">
                 <div className="activity-left">
-                  <div className="activity-icon">◫</div>
+                  <div className="activity-icon skel-icon" />
                   <div className="activity-info">
-                    <span className="activity-page">{item.page}</span>
-                    <span className="activity-meta">{item.action} · {item.time}</span>
+                    <div className="skel-block skel-line-lg" />
+                    <div className="skel-block skel-line-sm" />
                   </div>
-                </div>
-                <div className="activity-right">
-                  {item.issues === 0 ? (
-                    <span className="issue-pill" style={{ background: SEV_BG.none, color: SEV_COLOR.none }}>
-                      ✓ Healthy
-                    </span>
-                  ) : (
-                    <span
-                      className="issue-pill"
-                      style={{ background: SEV_BG[item.severity], color: SEV_COLOR[item.severity] }}>
-                      {item.issues} {item.issues === 1 ? "issue" : "issues"}
-                    </span>
-                  )}
                 </div>
               </div>
             ))}
+
+            {!loading && (!stats || stats.recent_activity.length === 0) && (
+              <div className="activity-empty">
+                <span>No activity recorded yet.</span>
+                <span className="activity-empty-hint">
+                  Approve or reject a proposal to see it here.
+                </span>
+              </div>
+            )}
+
+            {!loading && stats && stats.recent_activity.map(item => {
+              const ds = DECISION_STYLE[item.decision] ?? DECISION_STYLE.approved
+              return (
+                <div key={item.id} className="activity-row">
+                  <div className="activity-left">
+                    <div
+                      className="activity-icon"
+                      style={{ color: ds.color, background: ds.bg }}>
+                      {ds.icon}
+                    </div>
+                    <div className="activity-info">
+                      <span className="activity-page">{item.page_title}</span>
+                      <span className="activity-meta">
+                        {ACTION_LABEL[item.action] ?? item.action}
+                        {item.space_key ? ` · ${item.space_key}` : ""}
+                        {item.reviewed_by ? ` · by ${item.reviewed_by}` : ""}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="activity-right">
+                    <span
+                      className="issue-pill"
+                      style={{ background: ds.bg, color: ds.color }}>
+                      {item.decision}
+                    </span>
+                    <span className="activity-time">{relativeTime(item.updated_at)}</span>
+                  </div>
+                </div>
+              )
+            })}
           </div>
         </div>
 
-        {/* Quick actions / status */}
+        {/* Side col */}
         <div className="side-col">
 
-          {/* Connect Confluence */}
           <div className="card connect-card">
             <div className="connect-icon">⬡</div>
             <h3 className="connect-title">Confluence Connected</h3>
-            <p className="connect-sub">Extension is active and analyzing pages in real time via the browser extension.</p>
+            <p className="connect-sub">
+              {stats && stats.pages_total > 0
+                ? `${stats.pages_total} pages synced across ${stats.spaces_total} space${stats.spaces_total !== 1 ? "s" : ""}.`
+                : "Sync your workspace from the Pages tab to get started."}
+            </p>
             <div className="connect-status">
               <div className="status-dot" />
               <span>Live</span>
             </div>
           </div>
 
-          {/* What's next */}
           <div className="card">
             <div className="card-header">
-              <h2 className="card-title">Next Steps</h2>
+              <h2 className="card-title">Workflow</h2>
             </div>
             <div className="steps-list">
               {[
-                { done: true,  label: "Extension installed" },
-                { done: true,  label: "Backend API running" },
-                { done: true,  label: "First page analyzed" },
-                { done: false, label: "Connect Confluence API" },
-                { done: false, label: "Set up approval workflow" },
-                { done: false, label: "Enable audit logging" },
+                { done: (stats?.pages_total ?? 0) > 0,     label: "Workspace synced" },
+                { done: (stats?.decisions_made ?? 0) > 0,  label: "First decision made" },
+                { done: (stats?.changes_applied ?? 0) > 0, label: "Change applied to Confluence" },
+                { done: false,                               label: "Invite a team member" },
+                { done: false,                               label: "Schedule recurring sync" },
               ].map((step, i) => (
                 <div key={i} className={`step-row${step.done ? " done" : ""}`}>
                   <div className="step-check">{step.done ? "✓" : ""}</div>

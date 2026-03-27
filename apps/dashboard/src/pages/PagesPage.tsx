@@ -83,14 +83,16 @@ export default function PagesPage() {
     }
   }
 
-  async function analyzeSelected() {
-    if (!selected) return
-    setAnalyzingId(selected.id)
+  async function analyzeSelected(pageId = selected?.id) {
+    if (!pageId || !selected) return
+    // Clear any cached result so we always fetch fresh from Confluence
+    setAnalyses(prev => { const n = { ...prev }; delete n[pageId]; return n })
+    setAnalyzingId(pageId)
     setAnalyzeError(null)
 
     try {
-      // 1. Fetch content from Confluence via sync endpoint
-      const pageRes = await fetch(`${API_BASE}/api/sync/pages/${selected.id}`)
+      // 1. Fetch live content from Confluence (also updates DB cache)
+      const pageRes = await fetch(`${API_BASE}/api/sync/pages/${pageId}`)
       if (!pageRes.ok) throw new Error("Could not fetch page content")
       const pageData = await pageRes.json()
 
@@ -238,10 +240,25 @@ export default function PagesPage() {
             </div>
 
             {/* AI Analysis section */}
-            {analysis ? (
+            {isAnalyzing ? (
+              <div className="detail-analyze-cta">
+                <div className="summary-label">AI Analysis</div>
+                <button className="btn-analyze" disabled>
+                  <span className="spinner" /> Analyzing…
+                </button>
+              </div>
+            ) : analysis ? (
               <>
                 <div className="detail-summary">
-                  <div className="summary-label">AI Summary</div>
+                  <div className="summary-label-row">
+                    <span className="summary-label">AI Summary</span>
+                    <button
+                      className="btn-reanalyze"
+                      onClick={() => analyzeSelected()}
+                      title="Re-fetch from Confluence and re-analyze">
+                      ↻ Re-analyze
+                    </button>
+                  </div>
                   <p>{analysis.summary}</p>
                 </div>
 
@@ -285,13 +302,8 @@ export default function PagesPage() {
                 )}
                 <button
                   className="btn-analyze"
-                  onClick={analyzeSelected}
-                  disabled={isAnalyzing}>
-                  {isAnalyzing ? (
-                    <><span className="spinner" /> Analyzing…</>
-                  ) : (
-                    "Analyze with DocAI"
-                  )}
+                  onClick={() => analyzeSelected()}>
+                  Analyze with DocAI
                 </button>
               </div>
             )}

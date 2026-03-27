@@ -1,177 +1,241 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import "./AuditPage.css"
+
+const API_BASE = "http://localhost:8000"
 
 type AuditEntry = {
   id: string
-  pageTitle: string
-  pageSpace: string
+  page_id: string
+  page_title: string
+  space_key: string | null
   action: string
-  actionLabel: string
-  decision: "approved" | "rejected"
-  reviewer: string
-  reviewedAt: string
-  dateGroup: string
-  rationale: string
+  decision: "approved" | "rejected" | "applied" | "rolled_back"
+  reviewed_by: string | null
+  applied_by: string | null
+  rationale: string | null
+  note: string | null
+  snapshot_id: string | null
+  created_at: string | null
+  updated_at: string | null
 }
 
 const ACTION_STYLE: Record<string, { color: string; bg: string }> = {
-  archive:      { color: "#BF2600", bg: "rgba(191,38,0,0.08)"  },
-  add_summary:  { color: "#0747A6", bg: "rgba(7,71,166,0.08)"  },
-  update_owner: { color: "#974F0C", bg: "rgba(151,79,12,0.08)" },
-  restructure:  { color: "#403294", bg: "rgba(64,50,148,0.08)" },
-  merge:        { color: "#006644", bg: "rgba(0,102,68,0.08)"  },
+  archive:        { color: "#BF2600", bg: "rgba(191,38,0,0.08)"  },
+  add_summary:    { color: "#0747A6", bg: "rgba(7,71,166,0.08)"  },
+  update_owner:   { color: "#974F0C", bg: "rgba(151,79,12,0.08)" },
+  restructure:    { color: "#403294", bg: "rgba(64,50,148,0.08)" },
+  merge:          { color: "#006644", bg: "rgba(0,102,68,0.08)"  },
+  rewrite:        { color: "#403294", bg: "rgba(64,50,148,0.08)" },
+  remove_section: { color: "#BF2600", bg: "rgba(191,38,0,0.08)"  },
+  rename:         { color: "#006644", bg: "rgba(0,102,68,0.08)"  },
 }
 
-const mockAuditLog: AuditEntry[] = [
-  {
-    id: "a1",
-    pageTitle: "Legacy Onboarding v1",
-    pageSpace: "Operations",
-    action: "archive",
-    actionLabel: "Archive",
-    decision: "approved",
-    reviewer: "You",
-    reviewedAt: "3:42 PM",
-    dateGroup: "Yesterday",
-    rationale: "Page was 2+ years old with no owner. No objections from Operations.",
-  },
-  {
-    id: "a2",
-    pageTitle: "Engineering Runbook 2022",
-    pageSpace: "Engineering",
-    action: "add_summary",
-    actionLabel: "Add Summary",
-    decision: "rejected",
-    reviewer: "You",
-    reviewedAt: "2:15 PM",
-    dateGroup: "Yesterday",
-    rationale: "Page is still actively maintained — team confirmed in Slack.",
-  },
-  {
-    id: "a3",
-    pageTitle: "Product Roadmap Q2 2023",
-    pageSpace: "Product",
-    action: "update_owner",
-    actionLabel: "Update Owner",
-    decision: "approved",
-    reviewer: "You",
-    reviewedAt: "11:08 AM",
-    dateGroup: "Yesterday",
-    rationale: "Former owner had left the company. Ownership transferred to Product team.",
-  },
-  {
-    id: "a4",
-    pageTitle: "Security Policy v2",
-    pageSpace: "Engineering",
-    action: "restructure",
-    actionLabel: "Restructure",
-    decision: "approved",
-    reviewer: "You",
-    reviewedAt: "4:30 PM",
-    dateGroup: "2 days ago",
-    rationale: "Page lacked headers and was difficult to navigate. Structure improved.",
-  },
-  {
-    id: "a5",
-    pageTitle: "Sales Playbook 2021",
-    pageSpace: "Sales",
-    action: "archive",
-    actionLabel: "Archive",
-    decision: "rejected",
-    reviewer: "You",
-    reviewedAt: "9:15 AM",
-    dateGroup: "2 days ago",
-    rationale: "Sales team indicated portions are still referenced during onboarding.",
-  },
-  {
-    id: "a6",
-    pageTitle: "Incident Response Runbook",
-    pageSpace: "Engineering",
-    action: "update_owner",
-    actionLabel: "Update Owner",
-    decision: "approved",
-    reviewer: "You",
-    reviewedAt: "2:00 PM",
-    dateGroup: "Mar 22",
-    rationale: "On-call rotation changed. Ownership updated to Platform team.",
-  },
-]
+const ACTION_LABEL: Record<string, string> = {
+  archive:        "Archive",
+  add_summary:    "Add Summary",
+  update_owner:   "Update Owner",
+  restructure:    "Restructure",
+  merge:          "Merge",
+  rewrite:        "Rewrite",
+  remove_section: "Remove Section",
+  rename:         "Rename",
+}
+
+function dateGroup(iso: string | null): string {
+  if (!iso) return "Unknown"
+  const d = new Date(iso)
+  const now = new Date()
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const entryStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  const diff = Math.floor((todayStart - entryStart) / 86400000)
+  if (diff === 0) return "Today"
+  if (diff === 1) return "Yesterday"
+  if (diff < 7)  return `${diff} days ago`
+  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" }).format(d)
+}
+
+function formatTime(iso: string | null): string {
+  if (!iso) return ""
+  return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" }).format(new Date(iso))
+}
 
 export default function AuditPage() {
-  const [filter, setFilter] = useState<"all" | "approved" | "rejected">("all")
+  const [entries, setEntries] = useState<AuditEntry[]>([])
+  const [total, setTotal] = useState(0)
+  const [filter, setFilter] = useState<"all" | "approved" | "rejected" | "applied" | "rolled_back">("all")
+  const [loading, setLoading] = useState(true)
+  const [rollingBack, setRollingBack] = useState<string | null>(null)   // snapshot_id in progress
+  const [confirmId, setConfirmId] = useState<string | null>(null)       // snapshot_id awaiting confirm
 
-  const filtered = mockAuditLog.filter(
-    e => filter === "all" || e.decision === filter
-  )
+  function loadEntries() {
+    setLoading(true)
+    const qs = filter !== "all" ? `?decision=${filter}` : ""
+    fetch(`${API_BASE}/api/audit/${qs}`)
+      .then(r => r.json())
+      .then(data => {
+        setEntries(data.entries ?? [])
+        setTotal(data.total ?? 0)
+      })
+      .catch(() => { setEntries([]); setTotal(0) })
+      .finally(() => setLoading(false))
+  }
 
-  const groupOrder = Array.from(new Set(mockAuditLog.map(e => e.dateGroup)))
-  const groups = filtered.reduce<Record<string, AuditEntry[]>>((acc, entry) => {
-    if (!acc[entry.dateGroup]) acc[entry.dateGroup] = []
-    acc[entry.dateGroup].push(entry)
-    return acc
-  }, {})
+  useEffect(() => { loadEntries() }, [filter]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function doRollback(snapshotId: string) {
+    setRollingBack(snapshotId)
+    setConfirmId(null)
+    try {
+      const res = await fetch(`${API_BASE}/api/rollback/${snapshotId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rolled_back_by: "Dashboard User" }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        alert(`Rollback failed: ${err.detail ?? res.statusText}`)
+        return
+      }
+      // Refresh list so decision shows "rolled_back"
+      loadEntries()
+    } catch {
+      alert("Rollback failed: network error")
+    } finally {
+      setRollingBack(null)
+    }
+  }
+
+  // Group entries by date label while preserving server order (newest first)
+  const groupOrder: string[] = []
+  const groups: Record<string, AuditEntry[]> = {}
+  for (const e of entries) {
+    const g = dateGroup(e.updated_at)
+    if (!groups[g]) { groups[g] = []; groupOrder.push(g) }
+    groups[g].push(e)
+  }
 
   return (
     <div className="audit-layout">
       <div>
         <h1 className="audit-page-title">Audit Log</h1>
-        <p className="audit-page-sub">Every approved and rejected change is recorded here.</p>
+        <p className="audit-page-sub">Every approved, rejected, applied, and rolled-back change — recorded permanently.</p>
       </div>
 
       <div className="audit-controls">
         <div className="audit-filter-tabs">
-          {(["all", "approved", "rejected"] as const).map(f => (
+          {(["all", "approved", "rejected", "applied", "rolled_back"] as const).map(f => (
             <button
               key={f}
               className={`audit-tab${filter === f ? " active" : ""}`}
               onClick={() => setFilter(f)}>
-              {f.charAt(0).toUpperCase() + f.slice(1)}
+              {f === "rolled_back" ? "Rolled Back" : f.charAt(0).toUpperCase() + f.slice(1)}
             </button>
           ))}
         </div>
-        <span className="audit-count">{filtered.length} entries</span>
+        <span className="audit-count">{loading ? "—" : `${total} entries`}</span>
       </div>
 
       <div className="audit-timeline">
-        {filtered.length === 0 && (
-          <div className="audit-empty">No {filter} entries yet.</div>
+        {loading && Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="audit-entry">
+            <div className="audit-decision-icon" style={{ background: "var(--surface-3)" }} />
+            <div className="audit-entry-main">
+              <div className="skel-block skel-audit-title" />
+              <div className="skel-block skel-audit-sub" />
+            </div>
+          </div>
+        ))}
+
+        {!loading && entries.length === 0 && (
+          <div className="audit-empty">
+            <div className="audit-empty-icon">☰</div>
+            <p>No {filter !== "all" ? filter.replace("_", " ") : ""} entries yet.</p>
+            <p className="audit-empty-hint">
+              {filter === "all"
+                ? "Decisions appear here once proposals are approved or rejected."
+                : `No ${filter.replace("_", " ")} decisions recorded.`}
+            </p>
+          </div>
         )}
 
-        {groupOrder
-          .filter(g => groups[g]?.length > 0)
-          .map(group => (
-            <div key={group} className="audit-date-group">
-              <div className="audit-date-label">{group}</div>
+        {!loading && groupOrder.map(group => (
+          <div key={group} className="audit-date-group">
+            <div className="audit-date-label">{group}</div>
 
-              {groups[group].map(entry => {
-                const style = ACTION_STYLE[entry.action] ?? ACTION_STYLE.add_summary
-                return (
-                  <div key={entry.id} className="audit-entry">
-                    <div className={`audit-decision-icon ${entry.decision}`}>
-                      {entry.decision === "approved" ? "✓" : "✕"}
-                    </div>
+            {groups[group].map(entry => {
+              const style = ACTION_STYLE[entry.action] ?? ACTION_STYLE.add_summary
+              const actor = entry.applied_by ?? entry.reviewed_by ?? "DocAI"
+              const canRollback = entry.decision === "applied" && entry.snapshot_id
+              const isConfirming = confirmId === entry.snapshot_id
+              const isRollingBack = rollingBack === entry.snapshot_id
 
-                    <div className="audit-entry-main">
-                      <div className="audit-entry-top">
-                        <span className="audit-entry-page">{entry.pageTitle}</span>
-                        <span
-                          className="audit-action-badge"
-                          style={{ color: style.color, background: style.bg }}>
-                          {entry.actionLabel}
-                        </span>
-                      </div>
-                      <div className="audit-rationale">{entry.rationale}</div>
-                    </div>
-
-                    <div className="audit-entry-right">
-                      <div className="audit-reviewer">{entry.reviewer}</div>
-                      <div className="audit-time">{entry.reviewedAt}</div>
-                    </div>
+              return (
+                <div key={entry.id} className="audit-entry">
+                  <div className={`audit-decision-icon ${entry.decision}`}>
+                    {entry.decision === "applied"
+                      ? "↗"
+                      : entry.decision === "approved"
+                      ? "✓"
+                      : entry.decision === "rolled_back"
+                      ? "↺"
+                      : "✕"}
                   </div>
-                )
-              })}
-            </div>
-          ))}
+
+                  <div className="audit-entry-main">
+                    <div className="audit-entry-top">
+                      <span className="audit-entry-page">{entry.page_title}</span>
+                      <span
+                        className="audit-action-badge"
+                        style={{ color: style.color, background: style.bg }}>
+                        {ACTION_LABEL[entry.action] ?? entry.action}
+                      </span>
+                    </div>
+                    {entry.rationale && (
+                      <div className="audit-rationale">{entry.rationale}</div>
+                    )}
+                    {entry.note && (
+                      <div className="audit-note">"{entry.note}"</div>
+                    )}
+                  </div>
+
+                  <div className="audit-entry-right">
+                    <div className="audit-reviewer">{actor}</div>
+                    <div className="audit-decision-label" data-decision={entry.decision}>
+                      {entry.decision === "rolled_back" ? "Rolled Back" : entry.decision}
+                    </div>
+                    <div className="audit-time">{formatTime(entry.updated_at)}</div>
+
+                    {canRollback && !isConfirming && !isRollingBack && (
+                      <button
+                        className="btn-rollback"
+                        onClick={() => setConfirmId(entry.snapshot_id)}>
+                        ↺ Rollback
+                      </button>
+                    )}
+                    {canRollback && isConfirming && (
+                      <div className="rollback-confirm">
+                        <span className="rollback-confirm-text">Restore page?</span>
+                        <button
+                          className="btn-rollback-confirm"
+                          onClick={() => doRollback(entry.snapshot_id!)}>
+                          Yes
+                        </button>
+                        <button
+                          className="btn-rollback-cancel"
+                          onClick={() => setConfirmId(null)}>
+                          No
+                        </button>
+                      </div>
+                    )}
+                    {isRollingBack && (
+                      <span className="rollback-in-progress">Restoring…</span>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        ))}
       </div>
     </div>
   )

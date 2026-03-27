@@ -12,8 +12,9 @@ type Proposal = {
   action: string
   action_label?: string
   actionLabel?: string
-  pageTitle?: string
+  source_page_id?: string
   source_page_title?: string
+  pageTitle?: string
   pageSpace?: string
   space?: string
   rationale: string
@@ -58,87 +59,6 @@ function normalise(p: Proposal): Proposal & {
   }
 }
 
-const mockProposals: Proposal[] = [
-  {
-    id: "p1",
-    status: "pending",
-    action: "archive",
-    actionLabel: "Archive",
-    pageTitle: "Q3 2021 Sprint Retrospective",
-    pageSpace: "Engineering",
-    rationale:
-      "This page is 3+ years old with no recorded owner or follow-up actions. The sprint it references concluded in 2021 and the content provides no ongoing value. All action items remain unresolved with no assignee.",
-    proposedBy: "DocAI",
-    proposedAt: "2 minutes ago",
-    confidence: 92,
-    diff: [
-      { type: "hunk",    content: "@@ Page marked for archival @@" },
-      { type: "remove",  content: "# Q3 2021 Sprint Retrospective" },
-      { type: "remove",  content: "" },
-      { type: "remove",  content: "**Date:** September 30, 2021" },
-      { type: "remove",  content: "**Facilitator:** Unknown" },
-      { type: "remove",  content: "" },
-      { type: "remove",  content: "## What went well" },
-      { type: "remove",  content: "- Completed 23 of 27 story points" },
-      { type: "remove",  content: "- Good team collaboration on auth feature" },
-      { type: "remove",  content: "" },
-      { type: "remove",  content: "## Action items" },
-      { type: "remove",  content: "- [ ] Update estimation process   (UNRESOLVED)" },
-      { type: "remove",  content: "- [ ] Schedule retrospective training  (UNRESOLVED)" },
-    ],
-  },
-  {
-    id: "p2",
-    status: "pending",
-    action: "add_summary",
-    actionLabel: "Add Summary",
-    pageTitle: "API Integration Guide",
-    pageSpace: "Engineering",
-    rationale:
-      "This page lacks a structured introduction, ownership information, and review date. Adding an overview section will improve discoverability and establish clear accountability.",
-    proposedBy: "DocAI",
-    proposedAt: "5 minutes ago",
-    confidence: 85,
-    diff: [
-      { type: "hunk",    content: "@@ -1,4 +1,9 @@" },
-      { type: "context", content: "# API Integration Guide" },
-      { type: "context", content: "" },
-      { type: "add",     content: "## Overview" },
-      { type: "add",     content: "This guide covers authentication and endpoint usage." },
-      { type: "add",     content: "" },
-      { type: "add",     content: "**Owner:** Engineering Team  |  **Last reviewed:** 2024-Q1" },
-      { type: "add",     content: "" },
-      { type: "context", content: "## Authentication" },
-      { type: "context", content: "Use the API key from your settings page." },
-      { type: "hunk",    content: "@@ -14,5 +19,3 @@" },
-      { type: "remove",  content: "// TODO: document remaining endpoints" },
-      { type: "remove",  content: "// last updated by: ???" },
-    ],
-  },
-  {
-    id: "p3",
-    status: "pending",
-    action: "update_owner",
-    actionLabel: "Update Owner",
-    pageTitle: "Customer Onboarding Process",
-    pageSpace: "Operations",
-    rationale:
-      "The listed owner 'John' could not be resolved in the Confluence user directory. The Operations team has been identified as the likely owner based on the page's space and content.",
-    proposedBy: "DocAI",
-    proposedAt: "8 minutes ago",
-    confidence: 78,
-    diff: [
-      { type: "hunk",    content: "@@ Page metadata @@" },
-      { type: "remove",  content: "Owner:         John (unverified)" },
-      { type: "remove",  content: "Last reviewed: Unknown" },
-      { type: "add",     content: "Owner:         Operations Team" },
-      { type: "add",     content: "Last reviewed: 2024-03-26" },
-      { type: "hunk",    content: "@@ -8,3 +8,3 @@ Introduction" },
-      { type: "remove",  content: "Contact John for any questions about this process." },
-      { type: "add",     content: "Contact the Operations Team for any questions about this process." },
-    ],
-  },
-]
 
 const ACTION_STYLE: Record<string, { color: string; bg: string }> = {
   archive:        { color: "#BF2600", bg: "rgba(191,38,0,0.08)"   },
@@ -148,41 +68,35 @@ const ACTION_STYLE: Record<string, { color: string; bg: string }> = {
   merge:          { color: "#006644", bg: "rgba(0,102,68,0.08)"   },
   rewrite:        { color: "#403294", bg: "rgba(64,50,148,0.08)"  },
   remove_section: { color: "#BF2600", bg: "rgba(191,38,0,0.08)"   },
+  rename:         { color: "#006644", bg: "rgba(0,102,68,0.08)"   },
 }
 
 const API_BASE = "http://localhost:8000"
 
+type NormalisedProposal = ReturnType<typeof normalise>
+
 export default function ApprovalsPage() {
-  const [proposals, setProposals] = useState(mockProposals.map(normalise))
-  const [selected, setSelected] = useState<ReturnType<typeof normalise> | null>(null)
+  const [proposals, setProposals] = useState<NormalisedProposal[]>([])
+  const [selected, setSelected] = useState<NormalisedProposal | null>(null)
   const [filter, setFilter] = useState<"pending" | "all" | "approved" | "rejected">("pending")
 
-  // Apply modal state
-  const [applyModalOpen, setApplyModalOpen] = useState(false)
-  const [applyUrl, setApplyUrl] = useState("")
-  const [applyEmail, setApplyEmail] = useState("")
-  const [applyToken, setApplyToken] = useState("")
+  // Right panel tab state
+  const [rightTab, setRightTab] = useState<"diff" | "edit">("diff")
+  const [editedContents, setEditedContents] = useState<Record<string, string>>({})
+
+  // Apply state
   const [applyLoading, setApplyLoading] = useState(false)
   const [applyError, setApplyError] = useState<string | null>(null)
-  const [applySuccess, setApplySuccess] = useState(false)
 
-  // Load real proposals from API on mount, merge with mocks
+  // Load proposals from API on mount
   useEffect(() => {
     fetch(`${API_BASE}/api/proposals/`)
       .then(r => r.json())
       .then(data => {
-        if (data.proposals?.length) {
-          const apiProposals = (data.proposals as Proposal[]).map(normalise)
-          // Merge: API proposals first, then mock ones with different IDs
-          const apiIds = new Set(apiProposals.map(p => p.id))
-          const merged = [
-            ...apiProposals,
-            ...mockProposals.map(normalise).filter(p => !apiIds.has(p.id)),
-          ]
-          setProposals(merged)
-        }
+        const apiProposals = ((data.proposals ?? []) as Proposal[]).map(normalise)
+        setProposals(apiProposals)
       })
-      .catch(() => {/* backend not running — keep mock data */})
+      .catch(() => {/* backend unavailable */})
   }, [])
 
   const filtered = proposals.filter(p => filter === "all" || p.status === filter)
@@ -190,8 +104,8 @@ export default function ApprovalsPage() {
 
   async function review(id: string, decision: "approved" | "rejected") {
     // Optimistic update
-    setProposals(prev => prev.map(p => p.id === id ? { ...p, status: decision } : p))
-    setSelected(prev => prev?.id === id ? { ...prev, status: decision } : prev)
+    setProposals((prev: NormalisedProposal[]) => prev.map((p: NormalisedProposal) => p.id === id ? { ...p, status: decision } : p))
+    setSelected((prev: NormalisedProposal | null) => prev?.id === id ? { ...prev, status: decision } : prev)
 
     // Call real API (best-effort — mock proposals won't exist server-side)
     await fetch(`${API_BASE}/api/proposals/${id}/review`, {
@@ -199,15 +113,6 @@ export default function ApprovalsPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: decision, reviewed_by: "Dashboard User" }),
     }).catch(() => {/* ignore if mock proposal or backend unavailable */})
-  }
-
-  function openApplyModal() {
-    setApplyUrl("")
-    setApplyEmail("")
-    setApplyToken("")
-    setApplyError(null)
-    setApplySuccess(false)
-    setApplyModalOpen(true)
   }
 
   async function applyToConfluence() {
@@ -220,21 +125,24 @@ export default function ApprovalsPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          confluence_base_url: applyUrl,
-          email: applyEmail,
-          api_token: applyToken,
           applied_by: "Dashboard User",
+          content_override: editedContents[selected.id] ?? null,
         }),
       })
 
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        throw new Error(body.detail ?? `API error ${res.status}`)
+        const errBody = await res.json().catch(() => ({}))
+        throw new Error(errBody.detail ?? `API error ${res.status}`)
       }
 
-      setApplySuccess(true)
-      setProposals(prev => prev.map(p => p.id === selected.id ? { ...p, status: "applied" } : p))
-      setSelected(prev => prev?.id === selected.id ? { ...prev, status: "applied" } : prev)
+      setProposals((prev: NormalisedProposal[]) => prev.map((p: NormalisedProposal) => p.id === selected.id ? { ...p, status: "applied" } : p))
+      setSelected((prev: NormalisedProposal | null) => prev?.id === selected.id ? { ...prev, status: "applied" } : prev)
+
+      // Re-fetch the page from Confluence into the DB so the next analysis gets fresh content
+      const pageId = selected.source_page_id
+      if (pageId) {
+        fetch(`${API_BASE}/api/sync/pages/${pageId}`).catch(() => {/* best-effort */})
+      }
     } catch (e) {
       setApplyError(e instanceof Error ? e.message : "Something went wrong")
     } finally {
@@ -286,7 +194,7 @@ export default function ApprovalsPage() {
               <div
                 key={p.id}
                 className={`proposal-row${selected?.id === p.id ? " selected" : ""}`}
-                onClick={() => setSelected(p)}>
+                onClick={() => { setSelected(p); setRightTab("diff") }}>
 
                 <div className="proposal-row-top">
                   <span className="proposal-page">{p.pageTitle}</span>
@@ -342,7 +250,33 @@ export default function ApprovalsPage() {
               </div>
             </div>
 
+            {/* Tabs — only shown when there is editable AI content */}
+            {selected.new_content && (
+              <div className="content-tabs">
+                <button
+                  className={`content-tab${rightTab === "diff" ? " active" : ""}`}
+                  onClick={() => setRightTab("diff")}>
+                  Diff
+                </button>
+                <button
+                  className={`content-tab${rightTab === "edit" ? " active" : ""}`}
+                  onClick={() => {
+                    if (!editedContents[selected.id]) {
+                      setEditedContents(prev => ({ ...prev, [selected.id]: selected.new_content! }))
+                    }
+                    setRightTab("edit")
+                  }}>
+                  Edit Content
+                  {editedContents[selected.id] !== undefined &&
+                   editedContents[selected.id] !== selected.new_content && (
+                    <span className="modified-dot" title="Edited" />
+                  )}
+                </button>
+              </div>
+            )}
+
             {/* Diff viewer */}
+            {rightTab === "diff" && (
             <div className="diff-view">
               <div className="diff-view-header">
                 <span className="diff-view-title">Proposed Changes</span>
@@ -369,6 +303,30 @@ export default function ApprovalsPage() {
                 ))}
               </div>
             </div>
+            )}
+
+            {/* Content editor */}
+            {rightTab === "edit" && selected.new_content && (
+            <div className="diff-view">
+              <div className="diff-view-header">
+                <span className="diff-view-title">
+                  {selected.action === "rename" ? "Edit Suggested Title" : "Edit Content"}
+                </span>
+                <span className="edit-hint">
+                  {selected.action === "rename"
+                    ? "Adjust the suggested title before applying"
+                    : "Changes here will be sent to Confluence instead of the AI draft"}
+                </span>
+              </div>
+              <textarea
+                className={`content-editor${selected.action === "rename" ? " content-editor-title" : ""}`}
+                value={editedContents[selected.id] ?? selected.new_content}
+                onChange={e => setEditedContents(prev => ({ ...prev, [selected.id]: e.target.value }))}
+                spellCheck={selected.action !== "rename"}
+                rows={selected.action === "rename" ? 2 : undefined}
+              />
+            </div>
+            )}
 
             {/* Actions */}
             {selected.status === "pending" && (
@@ -384,14 +342,19 @@ export default function ApprovalsPage() {
             )}
 
             {selected.status === "approved" && (
-              <div className="diff-actions">
-                <div className="decision-badge decision-approved">✓ Approved</div>
-                {selected.new_content && (
-                  <button className="btn-apply" onClick={openApplyModal}>
-                    Apply to Confluence ↗
-                  </button>
+              <div className="diff-actions-col">
+                <div className="diff-actions">
+                  <div className="decision-badge decision-approved">✓ Approved</div>
+                  {selected.new_content && (
+                    <button className="btn-apply" onClick={applyToConfluence} disabled={applyLoading}>
+                      {applyLoading ? <span className="modal-loading"><span className="spinner-dark" /> Applying…</span> : "Apply to Confluence ↗"}
+                    </button>
+                  )}
+                  <button className="btn-ghost-sm">Open in Confluence ↗</button>
+                </div>
+                {applyError && (
+                  <div className="apply-error"><span>⚠</span> {applyError}</div>
                 )}
-                <button className="btn-ghost-sm">Open in Confluence ↗</button>
               </div>
             )}
 
@@ -415,106 +378,6 @@ export default function ApprovalsPage() {
         )}
       </div>
 
-      {/* ── Apply to Confluence modal ── */}
-      {applyModalOpen && selected && (
-        <div className="modal-overlay" onClick={() => setApplyModalOpen(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-
-            {applySuccess ? (
-              <div className="modal-success">
-                <div className="modal-success-icon">✓</div>
-                <h3>Applied to Confluence</h3>
-                <p>
-                  The changes to <strong>{selected.pageTitle}</strong> have been
-                  published to Confluence.
-                </p>
-                <button className="btn-primary" onClick={() => setApplyModalOpen(false)}>
-                  Done
-                </button>
-              </div>
-            ) : (
-              <>
-                <div className="modal-header">
-                  <div>
-                    <h3 className="modal-title">Apply to Confluence</h3>
-                    <p className="modal-sub">{selected.pageTitle}</p>
-                  </div>
-                  <button
-                    className="modal-close"
-                    onClick={() => setApplyModalOpen(false)}>✕</button>
-                </div>
-
-                <div className="modal-body">
-                  <p className="apply-note">
-                    Enter your Confluence credentials to publish these changes.
-                    Credentials are sent directly to Confluence and never stored.
-                  </p>
-
-                  <div className="modal-field">
-                    <label className="modal-field-label">Confluence URL</label>
-                    <input
-                      className="modal-input"
-                      type="text"
-                      placeholder="https://yourorg.atlassian.net"
-                      value={applyUrl}
-                      onChange={e => setApplyUrl(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="modal-field">
-                    <label className="modal-field-label">Email</label>
-                    <input
-                      className="modal-input"
-                      type="email"
-                      placeholder="you@yourorg.com"
-                      value={applyEmail}
-                      onChange={e => setApplyEmail(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="modal-field">
-                    <label className="modal-field-label">API Token</label>
-                    <input
-                      className="modal-input"
-                      type="password"
-                      placeholder="Your Atlassian API token"
-                      value={applyToken}
-                      onChange={e => setApplyToken(e.target.value)}
-                    />
-                  </div>
-
-                  {applyError && (
-                    <div className="modal-error">
-                      <span>⚠</span> {applyError}
-                    </div>
-                  )}
-                </div>
-
-                <div className="modal-footer">
-                  <button
-                    className="btn-ghost"
-                    onClick={() => setApplyModalOpen(false)}
-                    disabled={applyLoading}>
-                    Cancel
-                  </button>
-                  <button
-                    className="btn-apply-confirm"
-                    onClick={applyToConfluence}
-                    disabled={applyLoading || !applyUrl || !applyEmail || !applyToken}>
-                    {applyLoading ? (
-                      <span className="modal-loading">
-                        <span className="spinner-dark" /> Applying…
-                      </span>
-                    ) : (
-                      "Apply Changes"
-                    )}
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   )
 }

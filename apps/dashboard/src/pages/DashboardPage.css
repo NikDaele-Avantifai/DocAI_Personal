@@ -162,3 +162,35 @@
     background: var(--green-bg); border-color: var(--green);
     color: var(--green-text);
   }
+
+/* Skeleton loading */
+@keyframes shimmer {
+  0%   { opacity: 0.5; }
+  50%  { opacity: 1; }
+  100% { opacity: 0.5; }
+}
+
+.skel-block {
+  background: var(--surface-3); border-radius: 3px;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+.skel-val { height: 28px; width: 48px; margin-top: 6px; margin-bottom: 6px; }
+.skel-lbl { height: 12px; width: 90px; margin-bottom: 4px; }
+.skel-dlt { height: 10px; width: 70px; }
+.skel-line-lg { height: 13px; width: 220px; margin-bottom: 4px; }
+.skel-line-sm { height: 11px; width: 140px; }
+.skel-icon { background: var(--surface-3) !important; animation: shimmer 1.4s ease-in-out infinite; }
+
+/* Pulse for scan dot */
+@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+.scan-dot.pulsing { animation: pulse 1.2s ease-in-out infinite; }
+
+/* Activity time + empty state */
+.activity-time { font-size: 11px; color: var(--text-3); margin-top: 2px; display: block; text-align: right; }
+.activity-right { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+
+.activity-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; padding: 40px 24px; color: var(--text-3); font-size: 13px; text-align: center;
+}
+.activity-empty-hint { font-size: 12px; }

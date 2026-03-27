@@ -1,9 +1,16 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Literal
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+from app.core.config import settings
+from app.db.database import get_db
+from app.models.audit import AuditEntry
+from app.models.snapshot import Snapshot
 from app.services.confluence_service import ConfluenceService
 
 router = APIRouter()
@@ -52,7 +59,11 @@ async def create_proposal(body: CreateProposalRequest):
 
 
 @router.patch("/{proposal_id}/review")
-async def review_proposal(proposal_id: str, body: ReviewProposalRequest):
+async def review_proposal(
+    proposal_id: str,
+    body: ReviewProposalRequest,
+    db: AsyncSession = Depends(get_db),
+):
     if proposal_id not in _proposals:
         raise HTTPException(status_code=404, detail="Proposal not found")
 
@@ -62,9 +73,27 @@ async def review_proposal(proposal_id: str, body: ReviewProposalRequest):
 
     proposal["status"] = body.status
     proposal["reviewed_by"] = body.reviewed_by
-    proposal["reviewed_at"] = datetime.utcnow().isoformat()
+    proposal["reviewed_at"] = datetime.now(timezone.utc).isoformat()
     if body.note:
         proposal["note"] = body.note
+
+    # Write to audit log
+    stmt = pg_insert(AuditEntry).values(
+        id=proposal_id,
+        page_id=proposal.get("source_page_id", ""),
+        page_title=proposal.get("source_page_title", "Unknown Page"),
+        space_key=proposal.get("space_key"),
+        action=proposal.get("action", ""),
+        decision=body.status,
+        reviewed_by=body.reviewed_by,
+        rationale=proposal.get("rationale"),
+        note=body.note,
+    ).on_conflict_do_update(
+        index_elements=["id"],
+        set_={"decision": body.status, "reviewed_by": body.reviewed_by, "note": body.note,
+              "updated_at": datetime.now(timezone.utc)},
+    )
+    await db.execute(stmt)
 
     return proposal
 
@@ -77,17 +106,19 @@ async def get_proposal(proposal_id: str):
 
 
 class ApplyProposalRequest(BaseModel):
-    confluence_base_url: str
-    email: str
-    api_token: str
     applied_by: str = "Dashboard User"
+    content_override: str | None = None  # user-edited content takes precedence over AI-generated
 
 
 @router.post("/{proposal_id}/apply")
-async def apply_proposal(proposal_id: str, body: ApplyProposalRequest):
+async def apply_proposal(
+    proposal_id: str,
+    body: ApplyProposalRequest,
+    db: AsyncSession = Depends(get_db),
+):
     """
-    Apply an approved proposal to Confluence via the REST API.
-    Requires the user to supply Confluence credentials (never stored server-side).
+    Apply an approved proposal to Confluence using server-side credentials from config.
+    If content_override is provided, it is used instead of the AI-generated new_content.
     """
     if proposal_id not in _proposals:
         raise HTTPException(status_code=404, detail="Proposal not found")
@@ -99,41 +130,121 @@ async def apply_proposal(proposal_id: str, body: ApplyProposalRequest):
             detail=f"Cannot apply a proposal with status '{proposal['status']}'",
         )
 
+    if not settings.atlassian_api_token or not settings.atlassian_mail:
+        raise HTTPException(
+            status_code=503,
+            detail="Atlassian credentials not configured. Set ATLASSIAN_API_TOKEN and ATLASSIAN_MAIL in backend/.env",
+        )
+
     svc = ConfluenceService(
-        base_url=body.confluence_base_url,
-        api_token=body.api_token,
-        email=body.email,
+        base_url=settings.atlassian_base_url,
+        api_token=settings.atlassian_api_token,
+        email=settings.atlassian_mail,
     )
 
     action = proposal.get("action")
+    page_id = proposal["source_page_id"]
+    snapshot_id: str | None = None
 
     try:
         if action == "archive":
-            await svc.archive_page(proposal["source_page_id"])
+            # Archives are not automatically reversible — no snapshot
+            await svc.archive_page(page_id)
+
+        elif action == "rename":
+            new_title = body.content_override or proposal.get("new_content")
+            if not new_title:
+                raise HTTPException(status_code=400, detail="No suggested title found on this proposal.")
+
+            # Fetch current state for snapshot, then rename in one pass
+            current = await svc.get_page(page_id)
+            original_title = current.get("title", proposal["source_page_title"])
+            original_body  = current.get("body", {}).get("storage", {}).get("value", "")
+            original_ver   = current.get("version", {}).get("number", 1)
+
+            snap = Snapshot(
+                id=str(uuid.uuid4()),
+                proposal_id=proposal_id,
+                page_id=page_id,
+                action=action,
+                page_title_before=original_title,
+                page_body_before=None,       # body is untouched by rename
+                page_version_before=original_ver,
+                applied_by=body.applied_by,
+                applied_at=datetime.now(timezone.utc),
+            )
+            db.add(snap)
+            snapshot_id = snap.id
+
+            # Update title, preserve existing body (already in storage format)
+            await svc.update_page(page_id, new_title, original_body, original_ver, "storage")
+
         else:
-            new_content = proposal.get("new_content")
+            new_content = body.content_override or proposal.get("new_content")
             if not new_content:
                 raise HTTPException(
                     status_code=400,
                     detail="This proposal has no generated content to apply. Use /api/edit/generate first.",
                 )
-            page_version = proposal.get("page_version", 1)
-            await svc.update_page(
-                page_id=proposal["source_page_id"],
-                title=proposal["source_page_title"],
-                body=new_content,
-                current_version=page_version,
+
+            # Fetch current state for snapshot
+            current = await svc.get_page(page_id)
+            original_title = current.get("title", proposal["source_page_title"])
+            original_body  = current.get("body", {}).get("storage", {}).get("value", "")
+            original_ver   = current.get("version", {}).get("number", 1)
+
+            snap = Snapshot(
+                id=str(uuid.uuid4()),
+                proposal_id=proposal_id,
+                page_id=page_id,
+                action=action,
+                page_title_before=original_title,
+                page_body_before=original_body,
+                page_version_before=original_ver,
+                applied_by=body.applied_by,
+                applied_at=datetime.now(timezone.utc),
             )
+            db.add(snap)
+            snapshot_id = snap.id
+
+            await svc.update_page(page_id, original_title, new_content, original_ver)
+
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Confluence API error: {exc}",
-        )
+        raise HTTPException(status_code=502, detail=f"Confluence API error: {exc}")
 
     proposal["status"] = "applied"
-    proposal["applied_at"] = datetime.utcnow().isoformat()
+    proposal["applied_at"] = datetime.now(timezone.utc).isoformat()
     proposal["applied_by"] = body.applied_by
 
-    return {"success": True, "message": "Changes applied to Confluence successfully.", "proposal": proposal}
+    # Upsert audit entry with snapshot link
+    stmt = pg_insert(AuditEntry).values(
+        id=proposal_id,
+        page_id=proposal.get("source_page_id", ""),
+        page_title=proposal.get("source_page_title", "Unknown Page"),
+        space_key=proposal.get("space_key"),
+        action=proposal.get("action", ""),
+        decision="applied",
+        reviewed_by=proposal.get("reviewed_by"),
+        applied_by=body.applied_by,
+        rationale=proposal.get("rationale"),
+        note=proposal.get("note"),
+        snapshot_id=snapshot_id,
+    ).on_conflict_do_update(
+        index_elements=["id"],
+        set_={
+            "decision": "applied",
+            "applied_by": body.applied_by,
+            "snapshot_id": snapshot_id,
+            "updated_at": datetime.now(timezone.utc),
+        },
+    )
+    await db.execute(stmt)
+
+    return {
+        "success": True,
+        "message": "Changes applied to Confluence successfully.",
+        "proposal": proposal,
+        "snapshot_id": snapshot_id,
+    }

@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.api.routes import health, confluence, proposals, audit, analyze, edit
+from app.api.routes import health, confluence, proposals, audit, analyze, edit, stats, batch, rollback
 from app.api.routes import sync
 from app.db.database import init_db
 
@@ -47,3 +47,6 @@ app.include_router(audit.router, prefix="/api/audit", tags=["audit"])
 app.include_router(analyze.router, prefix="/api/analyze", tags=["analyze"])
 app.include_router(edit.router, prefix="/api/edit", tags=["edit"])
 app.include_router(sync.router, prefix="/api/sync", tags=["sync"])
+app.include_router(stats.router, prefix="/api/stats", tags=["stats"])
+app.include_router(batch.router, prefix="/api/batch", tags=["batch"])
+app.include_router(rollback.router, prefix="/api/rollback", tags=["rollback"])

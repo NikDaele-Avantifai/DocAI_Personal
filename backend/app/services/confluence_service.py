@@ -124,6 +124,22 @@ class ConfluenceService:
 
         return all_pages
 
+    async def rename_page(self, page_id: str, new_title: str) -> dict[str, Any]:
+        """
+        Rename a page: fetch current body + version, then update with the new title.
+        The body is left untouched so only the title changes in Confluence.
+        """
+        current = await self.get_page(page_id)
+        current_version = current.get("version", {}).get("number", 1)
+        current_body = current.get("body", {}).get("storage", {}).get("value", "")
+        return await self.update_page(
+            page_id=page_id,
+            title=new_title,
+            body=current_body,
+            current_version=current_version,
+            representation="storage",
+        )
+
     async def archive_page(self, page_id: str) -> bool:
         """Move a page to the archive by updating its status."""
         async with httpx.AsyncClient() as client:

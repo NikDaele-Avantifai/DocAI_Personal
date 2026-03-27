@@ -3,6 +3,7 @@ import DashboardPage from "./pages/DashboardPage"
 import ApprovalsPage from "./pages/ApprovalsPage"
 import AuditPage from "./pages/AuditPage"
 import PagesPage from "./pages/PagesPage"
+import BatchPage from "./pages/BatchPage"
 import Layout from "./components/Layout"
 
 function App() {
@@ -13,6 +14,7 @@ function App() {
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/approvals" element={<ApprovalsPage />} />
         <Route path="/pages"     element={<PagesPage />} />
+        <Route path="/batch"     element={<BatchPage />} />
         <Route path="/audit"     element={<AuditPage />} />
       </Route>
     </Routes>

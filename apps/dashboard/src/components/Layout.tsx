@@ -2,10 +2,11 @@ import { Outlet, NavLink } from "react-router-dom"
 import "./Layout.css"
 
 const nav = [
-  { to: "/dashboard", icon: "⬡", label: "Overview" },
-  { to: "/approvals", icon: "✓", label: "Approvals" },
-  { to: "/pages",     icon: "◫", label: "Pages" },
-  { to: "/audit",     icon: "≡", label: "Audit Log" },
+  { to: "/dashboard", icon: "⬡", label: "Overview"     },
+  { to: "/pages",     icon: "◫", label: "Pages"         },
+  { to: "/batch",     icon: "✎", label: "Batch Rename"  },
+  { to: "/approvals", icon: "✓", label: "Approvals"     },
+  { to: "/audit",     icon: "≡", label: "Audit Log"     },
 ]
 
 export default function Layout() {
