@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     app_secret_key: str = "dev-secret-change-in-production"
 
     # Database
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/doc_ai_db"
+    database_url: str = "postgresql+asyncpg://postgres@localhost:5432/doc_ai_db"
 
     # Azure Entra ID
     azure_tenant_id: str = ""
@@ -22,6 +22,9 @@ class Settings(BaseSettings):
 
     # Anthropic
     anthropic_api_key: str = ""
+
+    # Voyage AI (embeddings — get a free key at voyageai.com)
+    voyage_api_key: str = ""
 
     # OpenAI
     openai_api_key: str = ""

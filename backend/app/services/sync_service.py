@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -8,13 +9,27 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.models.page import Space, Page
 from app.services.confluence_service import ConfluenceService
 
+log = logging.getLogger(__name__)
+
 
 def _extract_parent_id(page: dict[str, Any]) -> str | None:
-    """Return the immediate parent page ID from the ancestors array, or None."""
+    """
+    Return the immediate parent ID for a page or folder.
+    - v1 pages: use ancestors[-1]
+    - v2 folders: use parentId (unless parentType is 'space', meaning top-level)
+    """
+    # v2 folder format
+    if page.get("_is_folder"):
+        parent_type = page.get("parentType", "space")
+        parent_id = page.get("parentId")
+        if parent_type != "space" and parent_id:
+            return str(parent_id)
+        return None
+
+    # v1 page format
     ancestors = page.get("ancestors", [])
     if not ancestors:
         return None
-    # ancestors[-1] is the immediate parent; ancestors[0] is the root
     return str(ancestors[-1]["id"])
 
 
@@ -42,14 +57,28 @@ def _build_tree(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for p in pages:
         page_map[p["id"]] = {**p, "children": []}
 
+    log.info("[build_tree] page_map has %d entries: %s",
+             len(page_map),
+             {pid: pages_dict["title"] for pid, pages_dict in page_map.items()})
+
     roots: list[dict[str, Any]] = []
-    for page_id, node in page_map.items():
+    for node in page_map.values():
         parent_id = node.get("parent_id")
         if parent_id and parent_id in page_map:
             page_map[parent_id]["children"].append(node)
+            log.info("[build_tree] '%s' (id=%s) → parent '%s' (id=%s) ✓",
+                     node["title"], node["id"],
+                     page_map[parent_id]["title"], parent_id)
         else:
             roots.append(node)
+            if parent_id:
+                log.warning("[build_tree] '%s' (id=%s) has parent_id=%s but that ID is NOT in page_map → placed at root",
+                            node["title"], node["id"], parent_id)
+            else:
+                log.info("[build_tree] '%s' (id=%s) has no parent → root",
+                         node["title"], node["id"])
 
+    log.info("[build_tree] %d root nodes, %d total nodes", len(roots), len(page_map))
     return roots
 
 
@@ -91,8 +120,12 @@ class SyncService:
         webui = _space_raw.get("_links", {}).get("webui", f"/spaces/{space_key}")
         space_url = f"{self.confluence.base_url}/wiki{webui}"
 
-        # ── 2. Fetch all pages ─────────────────────────────────────────────
+        # ── 2. Fetch all pages + folders ──────────────────────────────────
         raw_pages = await self.confluence.get_all_pages_in_space(space_key)
+
+        # ── 2b. Back-fill any missing parents (e.g. Confluence Cloud folders
+        #         that the v1 content API doesn't return by type) ───────────
+        raw_pages = await self._fill_missing_parents(raw_pages)
 
         # ── 3. Upsert space ────────────────────────────────────────────────
         now = datetime.now(timezone.utc)
@@ -157,6 +190,45 @@ class SyncService:
             "last_synced": now.isoformat(),
         }
 
+    async def _fill_missing_parents(
+        self, raw_pages: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """
+        Detect parent IDs referenced by synced pages that are not themselves in the
+        synced list (Confluence Cloud folder objects that the v1 type=page query skips).
+        Fetches each missing item directly by ID and adds it to the list.
+        Iterates until no new missing parents are found (handles arbitrary depth).
+        """
+        pages = list(raw_pages)
+        known_ids: set[str] = {str(p["id"]) for p in pages}
+        to_fetch: set[str] = set()
+
+        for p in pages:
+            pid = _extract_parent_id(p)
+            if pid and pid not in known_ids:
+                to_fetch.add(pid)
+
+        while to_fetch:
+            next_round: set[str] = set()
+            for missing_id in to_fetch:
+                log.info("[fill_missing_parents] fetching missing parent id=%s", missing_id)
+                item = await self.confluence.get_content_by_id(missing_id)
+                if item:
+                    pages.append(item)
+                    known_ids.add(missing_id)
+                    # Check if this newly fetched item also has a missing parent
+                    grandparent = _extract_parent_id(item)
+                    if grandparent and grandparent not in known_ids:
+                        next_round.add(grandparent)
+                else:
+                    log.warning("[fill_missing_parents] could not fetch id=%s", missing_id)
+            to_fetch = next_round
+
+        added = len(pages) - len(raw_pages)
+        if added:
+            log.info("[fill_missing_parents] added %d missing parent(s)", added)
+        return pages
+
     async def get_all_synced_spaces(self) -> list[dict[str, Any]]:
         """Return all spaces that have been synced, with metadata."""
         result = await self.session.execute(select(Space).order_by(Space.name))
@@ -195,9 +267,15 @@ class SyncService:
         ]
         return _build_tree(flat)
 
-    async def get_page_with_content(self, page_id: str) -> dict[str, Any]:
+    async def get_page_with_content(
+        self,
+        page_id: str,
+        embedding_svc: Any | None = None,
+    ) -> dict[str, Any]:
         """
         Fetch a page from Confluence (with full body content) and cache it locally.
+        If embedding_svc is provided, immediately generates and stores the embedding
+        so callers don't need a separate embed pass.
         Falls back to DB metadata if Confluence is unreachable.
         """
         try:
@@ -233,6 +311,14 @@ class SyncService:
             )
             await self.session.execute(stmt)
             await self.session.commit()
+
+            # Auto-embed immediately after storing content
+            if embedding_svc and content.strip():
+                try:
+                    await embedding_svc.embed_page(page_id, self.session)
+                    await self.session.commit()
+                except Exception as embed_exc:
+                    log.warning("get_page_with_content: auto-embed failed for %s: %s", page_id, embed_exc)
 
             return {
                 "id": page_id,

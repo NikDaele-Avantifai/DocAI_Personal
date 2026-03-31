@@ -1,8 +1,12 @@
 from datetime import datetime
+from typing import Optional
 from sqlalchemy import String, Integer, Text, DateTime, func, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
+from pgvector.sqlalchemy import Vector
 
 from app.db.database import Base
+
+EMBEDDING_DIM = 1024  # Voyage-3 native dimension
 
 
 class Space(Base):
@@ -32,6 +36,8 @@ class Page(Base):
     owner: Mapped[str | None] = mapped_column(String, nullable=True)
     url: Mapped[str | None] = mapped_column(String, nullable=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    content_hash: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    embedding: Mapped[Optional[list[float]]] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
     synced_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

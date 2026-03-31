@@ -89,12 +89,67 @@ class ConfluenceService:
             response.raise_for_status()
             return response.json()
 
-    async def get_all_pages_in_space(self, space_key: str) -> list[dict[str, Any]]:
+    async def _get_space_id(self, space_key: str) -> str | None:
+        """Resolve a space key to its numeric ID via the v2 API."""
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            try:
+                resp = await client.get(
+                    f"{self.base_url}/wiki/api/v2/spaces",
+                    auth=self._auth,
+                    params={"keys": space_key, "limit": 1},
+                    headers={"Accept": "application/json"},
+                )
+                if not resp.is_success:
+                    return None
+                results = resp.json().get("results", [])
+                return str(results[0]["id"]) if results else None
+            except Exception:
+                return None
+
+    async def _fetch_folders_v2(self, space_id: str) -> list[dict[str, Any]]:
         """
-        Fetch ALL pages in a space handling Confluence pagination.
-        Expands version, history, and ancestors so we can build parent/child trees.
+        Fetch all folders in a space using the Confluence Cloud v2 API.
+        Each folder dict is tagged with '_is_folder': True for downstream handling.
         """
-        all_pages: list[dict[str, Any]] = []
+        from urllib.parse import urlparse, parse_qs
+
+        folders: list[dict[str, Any]] = []
+        cursor: str | None = None
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            while True:
+                params: dict[str, Any] = {"space-id": space_id, "limit": 250}
+                if cursor:
+                    params["cursor"] = cursor
+
+                resp = await client.get(
+                    f"{self.base_url}/wiki/api/v2/folders",
+                    auth=self._auth,
+                    params=params,
+                    headers={"Accept": "application/json"},
+                )
+                if not resp.is_success:
+                    break  # v2 folders not available on this instance
+
+                data = resp.json()
+                results: list[dict[str, Any]] = data.get("results", [])
+                for r in results:
+                    r["_is_folder"] = True
+                folders.extend(results)
+
+                next_link = data.get("_links", {}).get("next", "")
+                if not next_link or not results:
+                    break
+                qs = parse_qs(urlparse(next_link).query)
+                cursor = (qs.get("cursor") or [None])[0]
+                if not cursor:
+                    break
+
+        return folders
+
+    async def _fetch_pages_v1(self, space_key: str) -> list[dict[str, Any]]:
+        """Paginate through all pages in a space using the v1 API."""
+        items: list[dict[str, Any]] = []
         start = 0
         limit = 100
 
@@ -116,13 +171,44 @@ class ConfluenceService:
                 response.raise_for_status()
                 data = response.json()
                 results: list[dict[str, Any]] = data.get("results", [])
-                all_pages.extend(results)
-
+                items.extend(results)
                 if len(results) < limit:
                     break
                 start += limit
+        return items
 
-        return all_pages
+    async def get_all_pages_in_space(self, space_key: str) -> list[dict[str, Any]]:
+        """
+        Fetch all pages (v1 API) + all folders (v2 API) in a space.
+        Confluence Cloud folders are a separate content type only accessible via v2.
+        """
+        pages = await self._fetch_pages_v1(space_key)
+
+        space_id = await self._get_space_id(space_key)
+        folders: list[dict[str, Any]] = []
+        if space_id:
+            folders = await self._fetch_folders_v2(space_id)
+
+        return pages + folders
+
+    async def get_content_by_id(self, content_id: str) -> dict[str, Any] | None:
+        """
+        Fetch any content item (page, folder, etc.) by its ID using the v1 API.
+        Returns None if the item doesn't exist or can't be fetched.
+        """
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            try:
+                response = await client.get(
+                    f"{self.base_url}/wiki/rest/api/content/{content_id}",
+                    auth=self._auth,
+                    params={"expand": "version,ancestors"},
+                    headers={"Accept": "application/json"},
+                )
+                if not response.is_success:
+                    return None
+                return response.json()
+            except Exception:
+                return None
 
     async def rename_page(self, page_id: str, new_title: str) -> dict[str, Any]:
         """

@@ -141,7 +141,6 @@
 .diff-line-add     { background: rgba(54, 179, 126, 0.10); }
 .diff-line-remove  { background: rgba(222, 53,  11, 0.08); }
 .diff-line-hunk    { background: rgba(7,  71, 166, 0.06); }
-.diff-line-context { }
 
 .diff-gutter {
   width: 28px; flex-shrink: 0; text-align: center;
