@@ -34,9 +34,11 @@ AsyncSessionLocal = async_sessionmaker(
 
 async def init_db() -> None:
     """Create all tables on startup. Warns instead of crashing if the DB is unreachable."""
-    from app.models.page import Base as PageBase   # noqa: F401 — registers Space + Page
-    from app.models.audit import AuditEntry        # noqa: F401 — registers AuditEntry
-    from app.models.snapshot import Snapshot       # noqa: F401 — registers Snapshot
+    from app.models.page import Base as PageBase                        # noqa: F401 — registers Space + Page
+    from app.models.audit import AuditEntry                             # noqa: F401 — registers AuditEntry
+    from app.models.snapshot import Snapshot                            # noqa: F401 — registers Snapshot
+    from app.models.page_analysis import PageAnalysis                   # noqa: F401 — registers PageAnalysis
+    from app.models.analysis_settings import WorkspaceSettings          # noqa: F401 — registers WorkspaceSettings
 
     try:
         async with engine.begin() as conn:

@@ -13,6 +13,7 @@ export type PageNode = {
   last_modified: string | null
   owner: string | null
   version: number
+  is_healthy: boolean
   children: PageNode[]
 }
 
@@ -65,9 +66,12 @@ function PageTreeItem({
           {expanded ? "▾" : "▸"}
         </span>
 
-        <span className="tree-page-icon">◫</span>
+        <span className="tree-page-icon">{hasChildren ? "⊟" : "◫"}</span>
         <span className="tree-page-title">{page.title}</span>
 
+        {page.is_healthy && !hasChildren && (
+          <span className="tree-healthy-check" title="No issues detected">✓</span>
+        )}
         {hasChildren && (
           <span className="tree-count">{page.children.length}</span>
         )}

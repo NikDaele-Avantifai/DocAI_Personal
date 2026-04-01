@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.models.page import Space, Page
@@ -181,12 +181,23 @@ class SyncService:
             )
             await self.session.execute(stmt)
 
+        # ── 5. Remove pages deleted from Confluence ────────────────────────
+        confluence_ids = {str(rp["id"]) for rp in raw_pages}
+        del_result = await self.session.execute(
+            delete(Page).where(
+                Page.space_key == space_key,
+                Page.id.not_in(confluence_ids),
+            )
+        )
+        deleted_count = del_result.rowcount
+
         await self.session.commit()
 
         return {
             "space_key": space_key,
             "space_name": space_name,
             "pages_synced": len(raw_pages),
+            "pages_deleted": deleted_count,
             "last_synced": now.isoformat(),
         }
 
@@ -262,6 +273,7 @@ class SyncService:
                 "last_modified": p.last_modified,
                 "owner": p.owner,
                 "version": p.version,
+                "is_healthy": getattr(p, "is_healthy", False),
             }
             for p in pages
         ]
@@ -304,8 +316,17 @@ class SyncService:
             stmt = stmt.on_conflict_do_update(
                 index_elements=["id"],
                 set_={
+                    "title": raw.get("title", "Untitled"),
                     "content": content,
                     "word_count": word_count,
+                    "version": raw.get("version", {}).get("number", 1),
+                    "last_modified": _extract_last_modified(raw),
+                    "owner": _extract_owner(raw),
+                    "url": (
+                        f"{self.confluence.base_url}/wiki{raw.get('_links', {}).get('webui', '')}"
+                        if raw.get("_links", {}).get("webui")
+                        else None
+                    ),
                     "synced_at": datetime.now(timezone.utc),
                 },
             )

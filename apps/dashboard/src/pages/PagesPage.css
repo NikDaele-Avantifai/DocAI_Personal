@@ -61,12 +61,73 @@
   .chevron-right { font-size: 14px; color: var(--text-3); }
   
   /* Detail panel */
-  .detail-panel { overflow-y: auto; background: var(--bg); }
-  
+  .detail-panel { overflow-y: auto; background: var(--bg); display: flex; flex-direction: column; }
+
   .detail-content {
     padding: 28px 32px;
     display: flex; flex-direction: column; gap: 18px;
     max-width: 620px;
+  }
+
+  /* ── Page view (tabs layout) ── */
+  .detail-page {
+    display: flex; flex-direction: column;
+    min-height: 100%;
+  }
+
+  .detail-page-header {
+    display: flex; align-items: flex-start; gap: 14px;
+    padding: 28px 32px 20px;
+  }
+
+  .detail-tab-bar {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    padding: 0 32px;
+    gap: 0;
+    flex-shrink: 0;
+  }
+
+  .detail-tab-btn {
+    padding: 10px 0;
+    margin-right: 24px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-2);
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    font-family: inherit;
+    transition: color 0.1s, border-color 0.1s;
+    margin-bottom: -1px; /* sit on top of bar border */
+  }
+  .detail-tab-btn:hover:not(:disabled) { color: var(--text-1); }
+  .detail-tab-btn.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+  .detail-tab-btn:disabled {
+    color: var(--text-3);
+    cursor: not-allowed;
+  }
+
+  .detail-page-overview {
+    padding: 20px 32px 32px;
+    max-width: 620px;
+    display: flex; flex-direction: column; gap: 18px;
+  }
+
+  /* Cached badge */
+  .cached-badge {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--green-text);
+    background: var(--green-bg);
+    border-radius: var(--radius-sm);
+    padding: 2px 7px;
   }
   
   .detail-header { display: flex; align-items: flex-start; gap: 14px; }
@@ -118,6 +179,16 @@
     transition: color 0.1s, background 0.1s;
   }
   .btn-reanalyze:hover { color: var(--accent); background: var(--accent-light); }
+
+  .btn-mark-reviewed {
+    background: transparent; border: 1px solid rgba(21,128,61,0.3); cursor: pointer;
+    font-size: 11.5px; font-weight: 500; color: var(--green-text, #15803d);
+    font-family: inherit; padding: 2px 8px; border-radius: 3px;
+    transition: color 0.1s, background 0.1s, border-color 0.1s;
+  }
+  .btn-mark-reviewed:hover {
+    background: var(--green-bg); border-color: var(--green-text, #15803d);
+  }
   .detail-summary p { font-size: 13px; color: var(--text-2); line-height: 1.6; }
   
   .detail-issues {
@@ -245,9 +316,110 @@
 .modal {
   background: var(--bg-white); border-radius: 8px;
   box-shadow: 0 8px 32px rgba(9,30,66,0.24);
-  width: 100%; max-width: 520px;
+  width: 100%; max-width: 560px;
   display: flex; flex-direction: column;
   max-height: 90vh; overflow: hidden;
+}
+
+/* ── Human-review callout ── */
+.modal-review-callout {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 20px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px; color: var(--text-2); line-height: 1.55;
+}
+.modal-review-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+
+/* ── Modal sections ── */
+.modal-section {
+  display: flex; flex-direction: column; gap: 8px;
+  transition: opacity 0.15s;
+}
+.modal-section-dimmed {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* ── Detected issue rows ── */
+.modal-issue-list {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.modal-issue-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 12px;
+  border: 1.5px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-white);
+  cursor: pointer; text-align: left; font-family: inherit;
+  transition: border-color 0.12s, background 0.12s;
+  width: 100%;
+}
+.modal-issue-row:hover { border-color: var(--border-2); background: var(--surface-2); }
+.modal-issue-row.selected {
+  border-color: var(--accent); background: var(--accent-light);
+}
+.modal-issue-radio {
+  font-size: 13px; color: var(--text-3); flex-shrink: 0; margin-top: 2px;
+  line-height: 1;
+}
+.modal-issue-row.selected .modal-issue-radio { color: var(--accent); }
+.modal-issue-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.modal-issue-title {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 13px; font-weight: 500; color: var(--text-1);
+}
+.modal-issue-sev {
+  font-size: 10px; font-weight: 700; padding: 1px 6px;
+  border-radius: 3px; flex-shrink: 0; text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.modal-issue-suggestion {
+  font-size: 11.5px; color: var(--text-3); line-height: 1.4;
+}
+.modal-issue-row.needs-human {
+  cursor: default;
+  border-color: var(--border);
+  background: var(--surface-2);
+  opacity: 0.85;
+}
+.modal-issue-row.needs-human .modal-issue-radio {
+  color: var(--amber-text, #b45309);
+}
+.modal-issue-human-flag {
+  font-size: 11px;
+  color: var(--amber-text, #b45309);
+  line-height: 1.5;
+  margin-top: 2px;
+}
+
+/* Static (non-interactive) fixable issue row */
+.modal-issue-row-static {
+  cursor: default;
+  pointer-events: none;
+}
+.modal-issue-row-static:hover {
+  border-color: var(--border);
+  background: transparent;
+}
+
+/* Checkmark icon for fixable issues */
+.modal-issue-check {
+  font-size: 12px;
+  color: #16a34a;
+  flex-shrink: 0;
+  line-height: 1;
+  margin-top: 1px;
+}
+
+/* Fix count badge next to section label — layout applied to existing rule below */
+.modal-fix-count {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: var(--accent-light, rgba(99,102,241,0.1));
+  color: var(--accent);
 }
 
 .modal-header {
@@ -273,6 +445,7 @@
 }
 
 .modal-section-label {
+  display: flex; align-items: center; gap: 8px;
   font-size: 10.5px; font-weight: 600; color: var(--text-3);
   text-transform: uppercase; letter-spacing: 0.4px;
 }
@@ -403,6 +576,26 @@
 
 .analyze-hint { font-size: 12.5px; color: var(--text-2); line-height: 1.55; }
 
+/* ── Folder children list ── */
+.folder-children-list {
+  display: flex; flex-direction: column; gap: 2px; margin-top: 10px;
+}
+
+.folder-child-row {
+  display: flex; align-items: center; gap: 7px;
+  padding: 7px 10px; border-radius: 5px;
+  cursor: pointer; transition: background 0.12s;
+}
+
+.folder-child-row:hover { background: var(--surface-2); }
+
+.folder-child-icon { font-size: 13px; color: var(--text-3); flex-shrink: 0; }
+
+.folder-child-title {
+  font-size: 13px; color: var(--text-1); flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
 .btn-analyze {
   display: flex; align-items: center; gap: 7px; align-self: flex-start;
   background: var(--accent); color: white;
@@ -431,10 +624,121 @@
 .issue-desc { font-size: 12px; color: var(--text-2); line-height: 1.5; }
 .issue-suggestion { font-size: 11.5px; color: var(--text-3); line-height: 1.5; }
 
-/* ── Healthy state ── */
-.detail-healthy {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 13px; color: var(--text-2);
-  background: var(--green-bg); border: 1px solid rgba(52,211,153,0.3);
-  border-radius: 5px; padding: 12px 14px;
+.issue-card-flagged {
+  border-left: 3px solid var(--amber-text, #b45309);
+  background: var(--amber-bg, rgba(180,83,9,0.06));
+}
+.issue-flag-icon {
+  color: var(--amber-text, #b45309);
+  margin-right: 5px;
+  font-size: 12px;
+}
+.issue-human-note {
+  font-size: 11px;
+  color: var(--amber-text, #b45309);
+  line-height: 1.5;
+  font-style: italic;
+}
+
+/* ── Healthy state banner ── */
+.detail-healthy-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  background: var(--green-bg);
+  border: 1px solid rgba(52,211,153,0.35);
+  border-radius: var(--radius-md);
+  padding: 14px 18px;
+  margin-bottom: 4px;
+}
+.detail-healthy-icon {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--green-text);
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+.detail-healthy-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--green-text);
+  margin-bottom: 3px;
+}
+.detail-healthy-sub {
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.5;
+}
+
+/* ── Resolved issues ── */
+.detail-resolved {
+  margin-top: 12px;
+}
+.resolved-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.resolved-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-3);
+  padding: 6px 10px;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  border-left: 2px solid var(--green-text, #15803d);
+}
+.resolved-check {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--green-text, #15803d);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.resolved-title {
+  font-weight: 500;
+  color: var(--text-2);
+  text-decoration: line-through;
+  text-decoration-color: var(--text-3);
+}
+.resolved-how {
+  color: var(--text-3);
+  font-style: italic;
+}
+
+/* ── Content tab CTA (overview → content) ── */
+.detail-content-cta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.btn-view-content {
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-light, rgba(99,102,241,0.08));
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-view-content:hover {
+  background: var(--accent);
+  color: #fff;
+}
+.detail-content-hint {
+  font-size: 11.5px;
+  color: var(--text-3);
+  line-height: 1.4;
 }

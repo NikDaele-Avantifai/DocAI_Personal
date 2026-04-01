@@ -1,10 +1,10 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import "./SettingsPage.css"
 
 const API_BASE = "http://localhost:8000"
 
-type Tab = "profile" | "integrations" | "preferences" | "about"
+type Tab = "profile" | "integrations" | "preferences" | "analysis" | "privacy" | "about"
 
 interface Profile {
   name: string
@@ -30,10 +30,53 @@ interface Preferences {
   notifApplied: boolean
 }
 
+interface AnalysisSettingsData {
+  enabled_issue_types: string[]
+  min_severity: "low" | "medium" | "high"
+  max_issues_per_page: number
+  confidence_threshold: number
+  stale_threshold_days: number
+  compliance_checking: boolean
+  focus_mode: "balanced" | "compliance" | "structure" | "hygiene"
+}
+
+const ANALYSIS_DEFAULTS: AnalysisSettingsData = {
+  enabled_issue_types: [
+    "stale", "unowned", "unstructured", "duplicate",
+    "outdated_reference", "missing_review_date", "compliance_gap", "broken_link",
+  ],
+  min_severity: "low",
+  max_issues_per_page: 5,
+  confidence_threshold: 0.75,
+  stale_threshold_days: 180,
+  compliance_checking: true,
+  focus_mode: "balanced",
+}
+
+const ISSUE_TYPES: { id: string; label: string; description: string; requiresHuman: boolean }[] = [
+  { id: "stale",              label: "Stale content",          description: "Page has not been updated within the configured threshold period",           requiresHuman: false },
+  { id: "unowned",            label: "No owner assigned",      description: "Page has no identifiable owner in content or metadata",                     requiresHuman: true  },
+  { id: "unstructured",       label: "Poor document structure",description: "Missing standard sections or inconsistent formatting",                       requiresHuman: false },
+  { id: "duplicate",          label: "Duplicate content",      description: "Content overlaps significantly with another page",                          requiresHuman: true  },
+  { id: "outdated_reference", label: "Outdated reference",     description: "Page references systems, people, or processes that no longer exist",        requiresHuman: true  },
+  { id: "missing_review_date",label: "Missing review date",    description: "Page has no scheduled review date",                                         requiresHuman: false },
+  { id: "compliance_gap",     label: "Compliance gap",         description: "Page is missing required compliance information for its document type",      requiresHuman: true  },
+  { id: "broken_link",        label: "Broken or missing link", description: "Page references documents or resources that cannot be found",                requiresHuman: true  },
+]
+
+const FOCUS_OPTIONS: { id: AnalysisSettingsData["focus_mode"]; label: string; description: string }[] = [
+  { id: "balanced",   label: "Balanced",   description: "Even coverage across all issue types — good for general health checks." },
+  { id: "compliance", label: "Compliance", description: "Prioritises compliance gaps and missing review dates — ideal for regulated content." },
+  { id: "structure",  label: "Structure",  description: "Focuses on ownership and document structure — best for onboarding wikis." },
+  { id: "hygiene",    label: "Hygiene",    description: "Targets stale content, outdated references, and broken links — keeps docs fresh." },
+]
+
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "profile",      label: "Profile",      icon: "👤" },
   { id: "integrations", label: "Integrations", icon: "🔗" },
   { id: "preferences",  label: "Preferences",  icon: "⚙" },
+  { id: "analysis",     label: "Analysis",     icon: "⚙" },
+  { id: "privacy",      label: "Privacy",      icon: "🔒" },
   { id: "about",        label: "About",        icon: "ℹ" },
 ]
 
@@ -424,6 +467,319 @@ function PreferencesTab() {
   )
 }
 
+// ── Analysis Tab ───────────────────────────────────────────────────────────────
+function AnalysisTab() {
+  const [form, setForm] = useState<AnalysisSettingsData>(ANALYSIS_DEFAULTS)
+  const [saved, setSaved] = useState(false)
+  const [reset, setReset] = useState(false)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isFirstLoad = useRef(true)
+
+  // Load on mount
+  useEffect(() => {
+    fetch(`${API_BASE}/api/settings/analysis`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data) setForm({ ...ANALYSIS_DEFAULTS, ...data })
+      })
+      .catch(() => {/* silently fall back to defaults */})
+  }, [])
+
+  // Auto-save with 500ms debounce on any change
+  useEffect(() => {
+    if (isFirstLoad.current) {
+      isFirstLoad.current = false
+      return
+    }
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      fetch(`${API_BASE}/api/settings/analysis`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (data) {
+            setSaved(true)
+            setTimeout(() => setSaved(false), 2000)
+          }
+        })
+        .catch(() => {/* silently ignore */})
+    }, 500)
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
+  }, [form])
+
+  function toggleIssueType(id: string) {
+    setForm(f => ({
+      ...f,
+      enabled_issue_types: f.enabled_issue_types.includes(id)
+        ? f.enabled_issue_types.filter(t => t !== id)
+        : [...f.enabled_issue_types, id],
+    }))
+  }
+
+  function handleReset() {
+    setForm(ANALYSIS_DEFAULTS)
+    setReset(true)
+    setTimeout(() => setReset(false), 2000)
+  }
+
+  const confidencePct = Math.round(form.confidence_threshold * 100)
+
+  return (
+    <div className="settings-section">
+      <div className="settings-section-header">
+        <h2 className="settings-section-title">
+          Analysis Settings
+          {saved && <span style={{ marginLeft: 10, fontSize: 12, fontWeight: 500, color: "var(--green-text)" }}>✓ Saved</span>}
+        </h2>
+        <p className="settings-section-sub">Control how DocAI detects and reports documentation issues.</p>
+      </div>
+
+      {/* Focus Mode */}
+      <div className="settings-fields">
+        <div className="settings-field">
+          <label className="settings-label">Focus Mode</label>
+          <div className="analysis-focus-group">
+            {FOCUS_OPTIONS.map(opt => (
+              <button
+                key={opt.id}
+                className={`focus-btn${form.focus_mode === opt.id ? " active" : ""}`}
+                onClick={() => setForm(f => ({ ...f, focus_mode: opt.id }))}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <div className="focus-desc">
+            {FOCUS_OPTIONS.find(o => o.id === form.focus_mode)?.description}
+          </div>
+        </div>
+      </div>
+
+      {/* Minimum Severity */}
+      <div className="settings-fields">
+        <div className="settings-field">
+          <label className="settings-label">Minimum Severity</label>
+          <div className="seg-control">
+            {(["low", "medium", "high"] as const).map((sev, i) => (
+              <button
+                key={sev}
+                className={`seg-btn${form.min_severity === sev ? " active" : ""}`}
+                onClick={() => setForm(f => ({ ...f, min_severity: sev }))}>
+                {i === 0 ? "Report all" : i === 1 ? "Medium and above" : "High only"}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Confidence Threshold */}
+      <div className="settings-fields">
+        <div className="settings-field">
+          <label className="settings-label">
+            Confidence Threshold — <strong>{confidencePct}%</strong>
+          </label>
+          <input
+            type="range" min={50} max={95} step={1}
+            className="settings-slider"
+            value={confidencePct}
+            onChange={e => setForm(f => ({ ...f, confidence_threshold: parseInt(e.target.value) / 100 }))}
+          />
+          <div className="settings-slider-labels">
+            <span>More issues</span>
+            <span>More accurate</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Stale Content Threshold */}
+      <div className="settings-fields">
+        <div className="settings-field">
+          <label className="settings-label">Stale Content Threshold</label>
+          <select
+            className="settings-select"
+            value={form.stale_threshold_days}
+            onChange={e => setForm(f => ({ ...f, stale_threshold_days: parseInt(e.target.value) }))}>
+            <option value={30}>30 days</option>
+            <option value={60}>60 days</option>
+            <option value={90}>90 days</option>
+            <option value={180}>180 days</option>
+            <option value={365}>1 year</option>
+            <option value={730}>2 years</option>
+            <option value={9999}>Never</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Active Issue Detectors */}
+      <div className="settings-fields">
+        <div className="settings-field">
+          <label className="settings-label">Active Issue Detectors</label>
+          <div className="toggle-list">
+            {ISSUE_TYPES.map(it => (
+              <div key={it.id} className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={form.enabled_issue_types.includes(it.id)}
+                  onChange={() => toggleIssueType(it.id)}
+                  style={{ accentColor: "var(--accent)", width: 15, height: 15, flexShrink: 0, cursor: "pointer" }}
+                />
+                <div className="toggle-row-info">
+                  <span className="toggle-row-label">{it.label}</span>
+                  <span className="toggle-row-desc">{it.description}</span>
+                </div>
+                {it.requiresHuman && (
+                  <span className="requires-human-badge">Requires human</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Max Issues Per Page */}
+      <div className="settings-fields">
+        <div className="settings-field">
+          <label className="settings-label">Max Issues Per Page</label>
+          <div className="seg-control">
+            {[3, 5, 8, 10].map(n => (
+              <button
+                key={n}
+                className={`seg-btn${form.max_issues_per_page === n ? " active" : ""}`}
+                onClick={() => setForm(f => ({ ...f, max_issues_per_page: n }))}>
+                {n}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <p className="settings-note">
+        Changes apply to new analyses. Re-analyze pages to use updated settings.
+      </p>
+
+      <button className="settings-reset-link" onClick={handleReset}>
+        {reset ? "✓ Reset" : "Reset to defaults"}
+      </button>
+    </div>
+  )
+}
+
+// ── Privacy Tab ────────────────────────────────────────────────────────────────
+function PrivacyTab() {
+  return (
+    <div className="settings-section">
+      <div className="settings-section-header">
+        <h2 className="settings-section-title">Privacy &amp; Data</h2>
+        <p className="settings-section-sub">How DocAI handles your data and what stays on your device.</p>
+      </div>
+
+      <div className="privacy-section">
+        <div className="privacy-section-title">What stays on your device</div>
+        <div className="privacy-section-body">
+          <div className="privacy-check-item">
+            <span className="privacy-check">✓</span>
+            <div>
+              <strong>API keys</strong> — Confluence, Anthropic, and Voyage AI keys are stored only in your browser's <code>localStorage</code>. They are never sent to DocAI servers.
+            </div>
+          </div>
+          <div className="privacy-check-item">
+            <span className="privacy-check">✓</span>
+            <div>
+              <strong>Profile preferences</strong> — Your name, email, role, and UI preferences are stored locally and never transmitted.
+            </div>
+          </div>
+          <div className="privacy-check-item">
+            <span className="privacy-check">✓</span>
+            <div>
+              <strong>Integration credentials</strong> — All connection secrets remain in your browser session only.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="privacy-section">
+        <div className="privacy-section-title">What goes to the backend</div>
+        <div className="privacy-section-body">
+          <div className="privacy-check-item">
+            <span className="privacy-circle">○</span>
+            <div>
+              <strong>Page content &amp; metadata</strong> — When you trigger an analysis, the page title, URL, content, and last-modified date are sent to the DocAI backend for processing.
+            </div>
+          </div>
+          <div className="privacy-check-item">
+            <span className="privacy-circle">○</span>
+            <div>
+              <strong>Analysis results</strong> — Issues, summaries, and health status are stored in the DocAI database so results can be cached and tracked over time.
+            </div>
+          </div>
+          <div className="privacy-check-item">
+            <span className="privacy-circle">○</span>
+            <div>
+              <strong>Audit events</strong> — Actions such as applying proposals, marking pages reviewed, and running batch jobs are logged in the audit trail.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="privacy-section">
+        <div className="privacy-section-title">What goes to third-party services</div>
+        <div className="privacy-section-body">
+          <div className="privacy-check-item">
+            <span className="privacy-circle">○</span>
+            <div>
+              <strong>Anthropic Claude</strong> — Page content is sent to Anthropic's API for AI analysis. This is subject to <a href="https://www.anthropic.com/privacy" target="_blank" rel="noreferrer">Anthropic's privacy policy</a>. Using Claude via API means your data is not used to train models by default.
+            </div>
+          </div>
+          <div className="privacy-check-item">
+            <span className="privacy-circle">○</span>
+            <div>
+              <strong>Voyage AI</strong> — Page content is sent to Voyage AI's API to generate semantic embeddings for duplicate detection. This is subject to <a href="https://www.voyageai.com/privacy" target="_blank" rel="noreferrer">Voyage AI's privacy policy</a>.
+            </div>
+          </div>
+          <div className="privacy-check-item">
+            <span className="privacy-circle">○</span>
+            <div>
+              <strong>Confluence (Atlassian)</strong> — DocAI reads and optionally writes to your Confluence workspace using the credentials you provide. Atlassian's own data handling applies.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="privacy-section">
+        <div className="privacy-section-title">Data retention</div>
+        <div className="privacy-section-body">
+          <div className="privacy-check-item">
+            <span className="privacy-check">✓</span>
+            <div>
+              Analysis results and audit logs are stored in your self-hosted PostgreSQL database. DocAI does not operate any cloud database on your behalf.
+            </div>
+          </div>
+          <div className="privacy-check-item">
+            <span className="privacy-check">✓</span>
+            <div>
+              You control retention. No data is ever sent to Anthropic-operated or DocAI-operated storage by this application.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="privacy-section">
+        <div className="privacy-section-title">On the roadmap</div>
+        <div className="privacy-section-body">
+          <div className="privacy-roadmap-item">Content redaction rules — strip PII from pages before sending to AI APIs</div>
+          <div className="privacy-roadmap-item">Per-space data policies — opt individual spaces out of AI analysis</div>
+          <div className="privacy-roadmap-item">Audit log export — download full audit history as CSV or JSON</div>
+          <div className="privacy-roadmap-item">Data deletion — purge all cached analyses for a page or space</div>
+        </div>
+      </div>
+
+      <div className="privacy-last-updated">Last updated: April 2026 — DocAI v0.1.0 Beta</div>
+    </div>
+  )
+}
+
 // ── About Tab ──────────────────────────────────────────────────────────────────
 function AboutTab() {
   const [health, setHealth] = useState<"checking" | "ok" | "error">("checking")
@@ -507,6 +863,8 @@ export default function SettingsPage() {
         {activeTab === "profile"      && <ProfileTab />}
         {activeTab === "integrations" && <IntegrationsTab />}
         {activeTab === "preferences"  && <PreferencesTab />}
+        {activeTab === "analysis"     && <AnalysisTab />}
+        {activeTab === "privacy"      && <PrivacyTab />}
         {activeTab === "about"        && <AboutTab />}
       </div>
     </div>

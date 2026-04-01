@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.database import get_db
 from app.models.page import Space, Page
 from app.models.audit import AuditEntry
+from app.models.page_analysis import PageAnalysis
 
 router = APIRouter()
 
@@ -14,6 +15,9 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
     # DB counts
     pages_total = (await db.execute(select(func.count()).select_from(Page))).scalar() or 0
     spaces_total = (await db.execute(select(func.count()).select_from(Space))).scalar() or 0
+    pages_healthy = (await db.execute(
+        select(func.count()).select_from(Page).where(Page.is_healthy == True)  # noqa: E712
+    )).scalar() or 0
     applied_count = (await db.execute(
         select(func.count()).select_from(AuditEntry).where(AuditEntry.decision == "applied")
     )).scalar() or 0
@@ -49,6 +53,7 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
     return {
         "pages_total": pages_total,
         "spaces_total": spaces_total,
+        "pages_healthy": pages_healthy,
         "proposals_pending": pending,
         "proposals_awaiting_apply": approved_pending_apply,
         "changes_applied": applied_count,

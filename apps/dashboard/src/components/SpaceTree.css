@@ -156,3 +156,14 @@
   border-radius: 50%; animation: tree-spin 0.65s linear infinite;
 }
 @keyframes tree-spin { to { transform: rotate(360deg); } }
+
+/* ── Healthy page indicator ── */
+.tree-healthy-check {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--green-text, #15803d);
+  margin-left: auto;
+  padding-right: 4px;
+  flex-shrink: 0;
+  opacity: 0.85;
+}

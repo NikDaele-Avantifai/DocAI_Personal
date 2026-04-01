@@ -18,6 +18,7 @@ type ActivityEntry = {
 type Stats = {
   pages_total: number
   spaces_total: number
+  pages_healthy: number
   proposals_pending: number
   proposals_awaiting_apply: number
   changes_applied: number
@@ -54,9 +55,13 @@ function relativeTime(iso: string | null): string {
 }
 
 function calcHealthScore(stats: Stats): number {
+  // Each unresolved proposal deducts points; each healthy page adds a bonus.
+  // This means fixing pages visibly improves the score.
+  const healthyBonus = (stats.pages_healthy ?? 0) * 2
   const score = 100
     - (stats.proposals_pending * 2)
     - (stats.proposals_awaiting_apply * 3)
+    + healthyBonus
   return Math.max(0, Math.min(100, score))
 }
 
@@ -115,8 +120,11 @@ export default function OverviewPage() {
             </div>
             {stats && (
               <p className="health-sub">
-                {stats.pages_total} pages analyzed ·{" "}
-                {stats.proposals_pending} issue{stats.proposals_pending !== 1 ? "s" : ""} found ·{" "}
+                {stats.pages_total} pages ·{" "}
+                <span style={{ color: "var(--green-text, #15803d)", fontWeight: 500 }}>
+                  {stats.pages_healthy ?? 0} healthy
+                </span>
+                {" "}·{" "}{stats.proposals_pending} issue{stats.proposals_pending !== 1 ? "s" : ""} open ·{" "}
                 {stats.proposals_awaiting_apply} awaiting apply
               </p>
             )}
@@ -136,10 +144,10 @@ export default function OverviewPage() {
       {/* ── Stats Row ── */}
       <div className="ov-stats-row">
         {[
-          { label: "Total Pages",       value: stats?.pages_total ?? "—",            delta: `${stats?.spaces_total ?? 0} spaces`,           accent: "#5B73FF", path: "/pages"    },
-          { label: "Issues Found",      value: stats?.proposals_pending ?? "—",       delta: "pending review",                                accent: "#FF991F", path: "/proposals" },
+          { label: "Total Pages",       value: stats?.pages_total ?? "—",             delta: `${stats?.spaces_total ?? 0} spaces · ${stats?.pages_healthy ?? 0} healthy`, accent: "#5B73FF", path: "/pages"    },
+          { label: "Issues Found",      value: stats?.proposals_pending ?? "—",        delta: "pending review",                               accent: "#FF991F", path: "/proposals" },
           { label: "Awaiting Apply",    value: stats?.proposals_awaiting_apply ?? "—", delta: "approved proposals",                           accent: "#818CF8", path: "/proposals" },
-          { label: "Changes Applied",   value: stats?.changes_applied ?? "—",         delta: "published to Confluence",                       accent: "#36B37E", path: "/audit"    },
+          { label: "Changes Applied",   value: stats?.changes_applied ?? "—",          delta: "published to Confluence",                      accent: "#36B37E", path: "/audit"    },
         ].map((card, i) => (
           <button
             key={i}
@@ -232,9 +240,9 @@ export default function OverviewPage() {
             <div className="ov-steps">
               {[
                 { done: (stats?.pages_total ?? 0) > 0,      label: "Workspace synced",             path: "/pages"       },
-                { done: (stats?.decisions_made ?? 0) > 0,   label: "First decision made",           path: "/proposals"   },
-                { done: (stats?.changes_applied ?? 0) > 0,  label: "Change applied to Confluence",  path: "/audit"       },
-                { done: false,                                label: "Set up integrations",           path: "/settings"    },
+                { done: (stats?.decisions_made ?? 0) > 0,   label: "First decision made",          path: "/proposals"   },
+                { done: (stats?.changes_applied ?? 0) > 0,  label: "Change applied to Confluence", path: "/audit"       },
+                { done: (stats?.pages_healthy ?? 0) > 0,    label: "First page marked healthy",    path: "/pages"       },
               ].map((step, i) => (
                 <div
                   key={i}

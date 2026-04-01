@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import String, Integer, Text, DateTime, func, UniqueConstraint
+from sqlalchemy import String, Integer, Text, DateTime, Boolean, func, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from pgvector.sqlalchemy import Vector
 
@@ -37,6 +37,7 @@ class Page(Base):
     url: Mapped[str | None] = mapped_column(String, nullable=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     content_hash: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    is_healthy: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     embedding: Mapped[Optional[list[float]]] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
     synced_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
