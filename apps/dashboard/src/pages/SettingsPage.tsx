@@ -541,7 +541,7 @@ function AnalysisTab() {
       <div className="settings-fields">
         <div className="settings-field">
           <label className="settings-label">Focus Mode</label>
-          <div className="analysis-focus-group">
+          <div data-tour="focus-mode" className="analysis-focus-group">
             {FOCUS_OPTIONS.map(opt => (
               <button
                 key={opt.id}

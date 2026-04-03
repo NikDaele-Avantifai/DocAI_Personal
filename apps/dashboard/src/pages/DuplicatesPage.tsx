@@ -142,7 +142,7 @@ export default function DuplicatesPage() {
                         "Inclusive — may surface partial overlaps"
 
   return (
-    <div className="dup-layout">
+    <div data-tour="duplicates-panel" className="dup-layout">
 
       {/* ── Header ── */}
       <div className="dup-header">

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 import { SkeletonRow } from "../components/Skeleton"
+import { useTour } from "../contexts/TourContext"
 import "./OverviewPage.css"
 
 const API_BASE = "http://localhost:8000"
@@ -79,6 +80,7 @@ function healthLabel(score: number): string {
 
 export default function OverviewPage() {
   const navigate = useNavigate()
+  const { startTour, showWelcome, dismissWelcome } = useTour()
   const [stats, setStats] = useState<Stats | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -96,8 +98,21 @@ export default function OverviewPage() {
   return (
     <div className="overview-layout">
 
+      {showWelcome && (
+        <div className="tour-welcome-banner">
+          <span className="tour-welcome-icon">👋</span>
+          <div className="tour-welcome-text">
+            <strong>Welcome to DocAI</strong> — take a 2-minute tour to see what this tool can do for your team.
+          </div>
+          <div className="tour-welcome-actions">
+            <button className="tour-welcome-start" onClick={startTour}>Start tour</button>
+            <button className="tour-welcome-dismiss" onClick={dismissWelcome}>Dismiss</button>
+          </div>
+        </div>
+      )}
+
       {/* ── Health Score Banner ── */}
-      <div className="health-banner" style={{ borderLeftColor: color }}>
+      <div data-tour="health-score" className="health-banner" style={{ borderLeftColor: color }}>
         <div className="health-banner-left">
           <div className="health-score-ring" style={{ "--score-color": color } as React.CSSProperties}>
             {loading
@@ -142,7 +157,7 @@ export default function OverviewPage() {
       </div>
 
       {/* ── Stats Row ── */}
-      <div className="ov-stats-row">
+      <div data-tour="stats-row" className="ov-stats-row">
         {[
           { label: "Total Pages",       value: stats?.pages_total ?? "—",             delta: `${stats?.spaces_total ?? 0} spaces · ${stats?.pages_healthy ?? 0} healthy`, accent: "#5B73FF", path: "/pages"    },
           { label: "Issues Found",      value: stats?.proposals_pending ?? "—",        delta: "pending review",                               accent: "#FF991F", path: "/proposals" },
@@ -173,7 +188,7 @@ export default function OverviewPage() {
       <div className="ov-grid">
 
         {/* Recent Activity */}
-        <div className="ov-card">
+        <div data-tour="activity-feed" className="ov-card">
           <div className="ov-card-header">
             <div>
               <h2 className="ov-card-title">Recent Activity</h2>

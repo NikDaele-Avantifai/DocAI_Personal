@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react"
-import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom"
+import { Outlet, NavLink, useLocation } from "react-router-dom"
 import "./Layout.css"
+import { useTour } from '../contexts/TourContext'
 
 const API_BASE = "http://localhost:8000"
 
@@ -40,7 +41,6 @@ function relativeTime(iso: string | null): string {
 }
 
 export default function Layout() {
-  const navigate = useNavigate()
   const location = useLocation()
   const [profileOpen, setProfileOpen] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
@@ -48,6 +48,7 @@ export default function Layout() {
   const [syncing, setSyncing] = useState(false)
   const [notifCount, setNotifCount] = useState(0)
   const profileRef = useRef<HTMLDivElement>(null)
+  const { startTour, isDemoMode } = useTour()
 
   // Load user profile from localStorage
   const profile = (() => {
@@ -191,6 +192,12 @@ export default function Layout() {
                 🔔
                 {notifCount > 0 && <span className="sidebar-notif-badge" />}
               </button>
+              <button
+                className="tour-trigger-btn"
+                title="Start product tour"
+                onClick={startTour}>
+                ?
+              </button>
               <NavLink to="/settings" className="sidebar-icon-btn" title="Settings">
                 ⚙
               </NavLink>
@@ -246,6 +253,8 @@ export default function Layout() {
               </span>
             ))}
           </div>
+
+          {isDemoMode && <span className="tour-demo-badge">Demo</span>}
 
           <div className="topbar-actions">
             <button

@@ -319,7 +319,7 @@ export default function PagesPage() {
     <div className="pages-layout">
 
       {/* ── Left panel ── */}
-      <div className="pages-panel">
+      <div data-tour="pages-tree" className="pages-panel">
         <div className="pages-header">
           <div>
             <h1 className="page-title">Pages</h1>
@@ -352,7 +352,7 @@ export default function PagesPage() {
       </div>
 
       {/* ── Right panel ── */}
-      <div className="detail-panel">
+      <div data-tour="page-detail" className="detail-panel">
         {selected ? (
           isFolder ? (
 
@@ -446,6 +446,7 @@ export default function PagesPage() {
                   Overview
                 </button>
                 <button
+                  data-tour="content-tab"
                   className={`detail-tab-btn${activeTab === "content" ? " active" : ""}`}
                   onClick={() => setActiveTab("content")}
                   disabled={!analysis}
@@ -554,7 +555,7 @@ export default function PagesPage() {
                               const sev = SEV[issue.severity] ?? SEV.low
                               const needsHuman = !!issue.needs_human_intervention
                               return (
-                                <div key={i} className={`issue-card${needsHuman ? " issue-card-flagged" : ""}`}>
+                                <div key={i} className={`issue-card${needsHuman ? " issue-card-flagged" : ""}`} {...(i === 0 ? { 'data-tour': 'issue-card' } : {})}>
                                   <div className="issue-card-top">
                                     <span className="issue-title">
                                       {needsHuman && <span className="issue-flag-icon" title="Needs manual input">⚑</span>}

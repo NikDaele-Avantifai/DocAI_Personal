@@ -1,0 +1,317 @@
+/* ══════════════════════════════════════════════════════════
+   DocAI Product Tour — custom overlay styles
+   ══════════════════════════════════════════════════════════ */
+
+/* Root container */
+.tour-root {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+}
+
+/* SVG overlay — covers full viewport */
+.tour-svg {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: all;
+}
+
+/* Spotlight ring — glowing border around the highlighted element */
+.tour-spotlight-ring {
+  position: fixed;
+  border: 2px solid rgba(0, 82, 204, 0.6);
+  border-radius: 8px;
+  box-shadow:
+    0 0 0 3px rgba(0, 82, 204, 0.12),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+  z-index: 10000;
+  animation: tour-ring-pulse 2s ease-in-out infinite;
+}
+
+@keyframes tour-ring-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(0, 82, 204, 0.12), inset 0 0 0 1px rgba(255,255,255,0.08); }
+  50%       { box-shadow: 0 0 0 6px rgba(0, 82, 204, 0.08), inset 0 0 0 1px rgba(255,255,255,0.08); }
+}
+
+/* ── Tooltip Card ──────────────────────────────────────── */
+
+.tour-card {
+  background: var(--bg-white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  pointer-events: all;
+  animation: tour-card-in 0.18s ease-out;
+}
+
+@keyframes tour-card-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Header */
+.tour-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tour-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+  line-height: 1.4;
+  flex: 1;
+}
+
+.tour-close-btn {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-3);
+  font-size: 11px;
+  border-radius: var(--radius-sm);
+  transition: background 0.1s, color 0.1s;
+  line-height: 1;
+}
+.tour-close-btn:hover {
+  background: var(--surface-3);
+  color: var(--text-1);
+}
+
+/* Body */
+.tour-card-body {
+  padding: 12px 16px;
+}
+
+.tour-card-text {
+  font-size: 12.5px;
+  color: var(--text-2);
+  line-height: 1.65;
+  margin: 0;
+}
+
+/* Footer */
+.tour-card-footer {
+  padding: 10px 16px 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* Progress dots */
+.tour-dots {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.tour-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--surface-3);
+  transition: all 0.2s;
+}
+
+.tour-dot.active {
+  width: 14px;
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+/* Buttons */
+.tour-buttons {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.tour-btn {
+  height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-family: inherit;
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.1s;
+  white-space: nowrap;
+}
+
+.tour-btn-ghost {
+  background: transparent;
+  border: none;
+  color: var(--text-3);
+  padding: 0 6px;
+}
+.tour-btn-ghost:hover { color: var(--text-2); }
+
+.tour-btn-secondary {
+  background: var(--bg-white);
+  border: 1px solid var(--border-2);
+  color: var(--text-2);
+}
+.tour-btn-secondary:hover {
+  background: var(--surface-2);
+}
+
+.tour-btn-primary {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: #fff;
+}
+.tour-btn-primary:hover { background: var(--accent-hover); }
+
+/* Step counter */
+.tour-step-counter {
+  position: absolute;
+  top: 14px;
+  right: 42px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Welcome Banner ─────────────────────────────────────── */
+
+.tour-welcome-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  background: var(--accent-light);
+  border: 1px solid rgba(0, 82, 204, 0.2);
+  border-radius: var(--radius-md);
+  font-size: 12.5px;
+  color: var(--text-2);
+  animation: tour-banner-in 0.3s ease-out;
+}
+
+@keyframes tour-banner-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.tour-welcome-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.tour-welcome-text {
+  flex: 1;
+  line-height: 1.5;
+}
+
+.tour-welcome-text strong {
+  color: var(--text-1);
+}
+
+.tour-welcome-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.tour-welcome-start {
+  height: 26px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-family: inherit;
+  font-weight: 600;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background 0.1s;
+  white-space: nowrap;
+}
+.tour-welcome-start:hover { background: var(--accent-hover); }
+
+.tour-welcome-dismiss {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-family: inherit;
+  background: transparent;
+  color: var(--text-3);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.1s;
+  white-space: nowrap;
+}
+.tour-welcome-dismiss:hover {
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+
+/* ── Sidebar tour button ────────────────────────────────── */
+
+.tour-trigger-btn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.1s;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.tour-trigger-btn:hover {
+  background: var(--surface-3);
+  color: var(--text-1);
+  border-color: var(--border-2);
+}
+
+/* ── Demo badge in topbar ───────────────────────────────── */
+
+.tour-demo-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--amber-bg);
+  color: var(--amber-text);
+  border: 1px solid rgba(255, 153, 31, 0.3);
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+/* ESC hint */
+.tour-esc-hint {
+  font-size: 10px;
+  color: rgba(255,255,255,0.5);
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 10001;
+}

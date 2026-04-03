@@ -1,0 +1,79 @@
+/* ═══════════════════════════════════════════════════════════
+   Design Tokens — DocAI B2B SaaS
+   ═══════════════════════════════════════════════════════════ */
+
+:root {
+
+  /* ── Colors ─────────────────────────────────────────────── */
+
+  --color-primary:        rgb(37, 99, 235);
+  --color-primary-hover:  rgb(29, 78, 216);
+  --color-primary-subtle: rgba(37, 99, 235, 0.08);
+  --color-text-link:      rgb(37, 99, 235);
+
+  --color-bg-app:     #f8f9fa;
+  --color-bg-sidebar: #ffffff;
+  --color-bg-card:    #ffffff;
+
+  --color-border:       rgba(0, 0, 0, 0.08);
+  --color-border-strong: rgba(0, 0, 0, 0.15);
+
+  --color-text-primary:   #111827;
+  --color-text-secondary: #6b7280;
+  --color-text-muted:     #9ca3af;
+
+  /* ── Spacing (4px base scale) ───────────────────────────── */
+
+  --space-1:   4px;
+  --space-2:   8px;
+  --space-3:   12px;
+  --space-4:   16px;
+  --space-5:   20px;
+  --space-6:   24px;
+  --space-7:   32px;
+  --space-8:   40px;
+  --space-9:   48px;
+  --space-10:  56px;
+  --space-11:  64px;
+  --space-12:  80px;
+  --space-13:  96px;
+  --space-14:  112px;
+  --space-15:  128px;
+  --space-16:  160px;
+
+  /* ── Border Radius ──────────────────────────────────────── */
+
+  --radius-sm:   4px;
+  --radius-md:   6px;
+  --radius-lg:   8px;
+  --radius-xl:   12px;
+  --radius-full: 9999px;
+
+  /* ── Font Sizes ─────────────────────────────────────────── */
+
+  --text-xs:   11px;
+  --text-sm:   13px;
+  --text-base: 14px;
+  --text-md:   15px;
+  --text-lg:   18px;
+  --text-xl:   22px;
+  --text-2xl:  28px;
+
+  /* ── Font Weights ───────────────────────────────────────── */
+
+  --font-normal:   400;
+  --font-medium:   500;
+  --font-semibold: 600;
+
+  /* ── Shadows ────────────────────────────────────────────── */
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+
+  /* ── Transitions ────────────────────────────────────────── */
+
+  --transition-fast: 120ms ease;
+  --transition-base: 200ms ease;
+
+}

@@ -135,7 +135,7 @@ export default function AuditPage() {
         <span className="audit-count">{loading ? "—" : `${total} entries`}</span>
       </div>
 
-      <div className="audit-timeline">
+      <div data-tour="audit-table" className="audit-timeline">
         {loading && Array.from({ length: 4 }).map((_, i) => (
           <div key={i} className="audit-entry">
             <div className="audit-decision-icon" style={{ background: "var(--surface-3)" }} />

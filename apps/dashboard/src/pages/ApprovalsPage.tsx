@@ -180,7 +180,7 @@ export default function ApprovalsPage() {
           </div>
         </div>
 
-        <div className="proposals-list">
+        <div data-tour="proposals-list" className="proposals-list">
           {filtered.length === 0 && (
             <div className="proposals-empty">
               <span>✓</span>
@@ -331,7 +331,7 @@ export default function ApprovalsPage() {
             {/* Actions */}
             {selected.status === "pending" && (
               <div className="diff-actions">
-                <button className="btn-approve" onClick={() => review(selected.id, "approved")}>
+                <button data-tour="approve-button" className="btn-approve" onClick={() => review(selected.id, "approved")}>
                   ✓ Approve
                 </button>
                 <button className="btn-reject" onClick={() => review(selected.id, "rejected")}>
