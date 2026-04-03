@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import "./PagesPage.css"
 import SpaceTree, { type PageNode } from "../components/SpaceTree"
 import ContentViewer, { type Issue as ContentIssue } from "../components/ContentViewer"
@@ -53,13 +53,20 @@ const EDIT_OPTIONS: { type: EditType; label: string; description: string; icon: 
   { type: "remove_section", label: "Remove Section", description: "Strip a specific outdated section",                 icon: "✕" },
 ]
 
-// Map issue type → suggested edit type for the modal pre-selection
 const ISSUE_TO_EDIT: Record<string, EditType> = {
   stale:        "rewrite",
   duplicate:    "remove_section",
   orphan:       "restructure",
   unowned:      "add_summary",
   unstructured: "restructure",
+}
+
+const FLAG_LABEL: Record<string, string> = {
+  stale:         "stale content",
+  empty:         "insufficient content",
+  no_owner:      "no owner",
+  generic_title: "generic title",
+  needs_review:  "open issues",
 }
 
 function fmt(iso: string | null | undefined): string {
@@ -71,10 +78,13 @@ function fmt(iso: string | null | undefined): string {
   }
 }
 
+function countDescendants(nodes: PageNode[]): number {
+  return nodes.reduce((acc, n) => acc + 1 + countDescendants(n.children), 0)
+}
+
 export default function PagesPage() {
   const [selected, setSelected] = useState<PageNode | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
-  const [activeTab, setActiveTab] = useState<"overview" | "content">("overview")
 
   // Sync state
   const [syncing, setSyncing] = useState(false)
@@ -89,6 +99,9 @@ export default function PagesPage() {
   // Per-page content cache (keyed by page ID)
   const [pageContents, setPageContents] = useState<Record<string, string>>({})
 
+  // Sweep flags (page id → string[] of issue categories)
+  const [sweepPageFlags, setSweepPageFlags] = useState<Record<string, string[]>>({})
+
   // Propose-all state
   const [proposingAll, setProposingAll] = useState(false)
 
@@ -100,6 +113,21 @@ export default function PagesPage() {
   const [editLoading, setEditLoading] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
   const [createdProposalCount, setCreatedProposalCount] = useState(0)
+
+  // Load sweep data once on mount
+  useEffect(() => {
+    fetch(`${API_BASE}/api/sweep/latest`)
+      .then(r => r.json())
+      .then(data => {
+        if (!data?.at_risk_pages) return
+        const flags: Record<string, string[]> = {}
+        for (const p of data.at_risk_pages) {
+          flags[p.id] = p.flags
+        }
+        setSweepPageFlags(flags)
+      })
+      .catch(() => {})
+  }, [])
 
   // ── Actions ────────────────────────────────────────────────────────────────
 
@@ -130,22 +158,15 @@ export default function PagesPage() {
     setAnalyzeError(null)
 
     try {
-      // 1. Fetch live content from Confluence (also updates DB cache)
       const pageRes = await fetch(`${API_BASE}/api/sync/pages/${pageId}`)
       if (!pageRes.ok) throw new Error("Could not fetch page content")
       const pageData = await pageRes.json()
 
-      // Store raw content for ContentViewer
       if (pageData.content) {
         setPageContents(prev => ({ ...prev, [pageId]: pageData.content }))
       }
 
-      // 2. Run AI analysis — DB-cached unless forceRefresh
-      // Use version from the live Confluence fetch — not the stale SpaceTree value.
-      // After a fix is applied, Confluence increments the version; the SpaceTree
-      // won't reflect this until the next full sync, but pageData always has the truth.
       const liveVersion = pageData.version ?? selected.version
-
       const qs = forceRefresh ? "?force_refresh=true" : ""
       const analyzeRes = await fetch(`${API_BASE}/api/analyze/${qs}`, {
         method: "POST",
@@ -207,7 +228,7 @@ export default function PagesPage() {
     setSelectedIssueForFix(issue ?? null)
     setRemoveSectionHint("")
     setEditError(null)
-    setCreatedProposalId(null)
+    setCreatedProposalCount(0)
   }
 
   function closeModal() {
@@ -229,7 +250,6 @@ export default function PagesPage() {
       const pageData = await pageRes.json()
 
       if (selectedIssueForFix) {
-        // Single targeted fix — opened from ContentViewer annotation card
         const res = await fetch(`${API_BASE}/api/edit/generate`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -251,7 +271,6 @@ export default function PagesPage() {
         }
         setCreatedProposalCount(1)
       } else {
-        // Overview mode: fix all fixable issues in parallel, or run a general improvement
         const fixableIssues = (analysis?.issues ?? []).filter(i => !i.needs_human_intervention)
         if (fixableIssues.length > 0) {
           const results = await Promise.allSettled(
@@ -277,7 +296,6 @@ export default function PagesPage() {
           if (succeeded === 0) throw new Error("All proposals failed to generate")
           setCreatedProposalCount(succeeded)
         } else {
-          // No fixable issues — general improvement
           const res = await fetch(`${API_BASE}/api/edit/generate`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -306,13 +324,10 @@ export default function PagesPage() {
   }
 
   // ── Derived ────────────────────────────────────────────────────────────────
-  const analysis   = selected ? analyses[selected.id] : null
+  const analysis    = selected ? analyses[selected.id] : null
   const isAnalyzing = selected ? analyzingId === selected.id : false
-  const isFolder   = (selected?.children.length ?? 0) > 0
-
-  function countDescendants(nodes: PageNode[]): number {
-    return nodes.reduce((acc, n) => acc + 1 + countDescendants(n.children), 0)
-  }
+  const isFolder    = (selected?.children.length ?? 0) > 0
+  const pageFlags   = selected ? (sweepPageFlags[selected.id] ?? []) : []
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -344,10 +359,10 @@ export default function PagesPage() {
           onPageSelect={page => {
             setSelected(page)
             setAnalyzeError(null)
-            setActiveTab("overview")
           }}
           selectedPageId={selected?.id ?? null}
           refreshKey={refreshKey}
+          sweepFlags={sweepPageFlags}
         />
       </div>
 
@@ -356,7 +371,7 @@ export default function PagesPage() {
         {selected ? (
           isFolder ? (
 
-            /* ── Folder view (unchanged) ── */
+            /* ── Folder view ── */
             <div className="detail-content">
               <div className="detail-header">
                 <div className="detail-icon">⊟</div>
@@ -388,7 +403,7 @@ export default function PagesPage() {
                 <div className="summary-label">Folder contents</div>
                 <p className="analyze-hint">
                   This is a folder containing {selected.children.length} page{selected.children.length !== 1 ? "s" : ""}.
-                  Select an individual page to analyze it or edit it with AI.
+                  Select an individual page to analyze it.
                 </p>
                 <div className="folder-children-list">
                   {selected.children.map(child => (
@@ -398,7 +413,6 @@ export default function PagesPage() {
                       onClick={() => {
                         setSelected(child)
                         setAnalyzeError(null)
-                        setActiveTab("overview")
                       }}>
                       <span className="folder-child-icon">{child.children.length > 0 ? "⊟" : "◫"}</span>
                       <span className="folder-child-title">{child.title}</span>
@@ -423,46 +437,128 @@ export default function PagesPage() {
 
           ) : (
 
-            /* ── Page view with tabs ── */
+            /* ── Page view — no tabs ── */
             <div className="detail-page">
 
-              {/* Page header */}
+              {/* Slim page header */}
               <div className="detail-page-header">
-                <div className="detail-icon">◫</div>
-                <div style={{ minWidth: 0 }}>
-                  <h2 className="detail-title">{selected.title}</h2>
-                  <p className="detail-meta">
-                    ~{selected.id}
-                    {selected.last_modified && ` · Modified ${fmt(selected.last_modified)}`}
-                  </p>
+                <div className="detail-header-left">
+                  <div className="detail-icon">◫</div>
+                  <div style={{ minWidth: 0 }}>
+                    <h2 className="detail-title">{selected.title}</h2>
+                    <p className="detail-meta">
+                      {selected.space_key}
+                      {selected.last_modified && ` · Modified ${fmt(selected.last_modified)}`}
+                      {` · v${selected.version}`}
+                      {selected.word_count > 0 && ` · ${selected.word_count.toLocaleString()} words`}
+                    </p>
+                  </div>
+                </div>
+                <div className="detail-header-btns">
+                  {analysis?.cached && <span className="cached-badge">Cached</span>}
+                  {analysis && (
+                    <>
+                      <button
+                        className="btn-reanalyze"
+                        onClick={() => analyzeSelected(true)}
+                        title="Re-fetch from Confluence and re-analyze">
+                        ↻ Re-analyze
+                      </button>
+                      <button
+                        className="btn-mark-reviewed"
+                        onClick={() => {
+                          if (!selected) return
+                          fetch(`${API_BASE}/api/analyze/mark-reviewed/${selected.id}`, { method: "POST" })
+                            .then(() => analyzeSelected(true))
+                        }}
+                        title="Mark this page as manually reviewed and healthy">
+                        ✓ Reviewed
+                      </button>
+                    </>
+                  )}
+                  {selected.url ? (
+                    <a href={selected.url} target="_blank" rel="noreferrer" className="btn-outline-sm">
+                      Open ↗
+                    </a>
+                  ) : (
+                    <button className="btn-outline-sm" disabled>Open ↗</button>
+                  )}
                 </div>
               </div>
 
-              {/* Tab bar */}
-              <div className="detail-tab-bar">
-                <button
-                  className={`detail-tab-btn${activeTab === "overview" ? " active" : ""}`}
-                  onClick={() => setActiveTab("overview")}>
-                  Overview
-                </button>
-                <button
-                  data-tour="content-tab"
-                  className={`detail-tab-btn${activeTab === "content" ? " active" : ""}`}
-                  onClick={() => setActiveTab("content")}
-                  disabled={!analysis}
-                  title={!analysis ? "Run analysis first to enable content view" : undefined}>
-                  Content
-                </button>
-              </div>
+              {/* Sweep hint — only shown before analysis */}
+              {!analysis && !isAnalyzing && pageFlags.length > 0 && (
+                <div className="detail-sweep-hint">
+                  <span className={`detail-sweep-dot${pageFlags.length >= 2 ? " red" : " amber"}`} />
+                  <span>
+                    Sweep detected {pageFlags.length} potential issue{pageFlags.length !== 1 ? "s" : ""}
+                    {" "}({pageFlags.map(f => FLAG_LABEL[f] ?? f).join(", ")}) — analyze to find exact fixes
+                  </span>
+                </div>
+              )}
 
-              {/* ── Overview tab ── */}
-              {activeTab === "overview" && (
-                <div className="detail-page-overview">
+              {/* Resolved issues strip */}
+              {analysis?.resolved_issues && analysis.resolved_issues.length > 0 && (
+                <div className="detail-resolved-strip">
+                  <span className="detail-resolved-label">Previously fixed</span>
+                  {analysis.resolved_issues.map((r, i) => (
+                    <span key={i} className="detail-resolved-item">
+                      <span className="detail-resolved-check">✓</span>
+                      {r.title}
+                    </span>
+                  ))}
+                </div>
+              )}
 
+              {/* ── Body ── */}
+              {isAnalyzing ? (
+
+                <div className="detail-analyzing-state">
+                  <span className="spinner-lg" />
+                  <div className="detail-analyzing-label">Analyzing with DocAI…</div>
+                  <div className="detail-analyzing-sub">Reading page content and checking for issues</div>
+                </div>
+
+              ) : analysis ? (
+
+                analysis.is_healthy && analysis.issues.length === 0 ? (
+                  <>
+                    <div className="detail-healthy-banner">
+                      <span className="detail-healthy-icon">✓</span>
+                      <div>
+                        <div className="detail-healthy-title">This page is healthy</div>
+                        {analysis.summary && (
+                          <div className="detail-healthy-sub">{analysis.summary}</div>
+                        )}
+                      </div>
+                    </div>
+                    <ContentViewer
+                      key={selected.id}
+                      content={pageContents[selected.id] ?? ""}
+                      issues={[]}
+                      pageTitle={selected.title}
+                      onCreateProposal={issue => openEditModal(ISSUE_TO_EDIT[issue.type], issue)}
+                      onProposeAll={proposeAll}
+                    />
+                  </>
+                ) : (
+                  <ContentViewer
+                    key={selected.id}
+                    content={pageContents[selected.id] ?? ""}
+                    issues={analysis.issues as ContentIssue[]}
+                    pageTitle={selected.title}
+                    onCreateProposal={issue => openEditModal(ISSUE_TO_EDIT[issue.type], issue)}
+                    onProposeAll={proposeAll}
+                  />
+                )
+
+              ) : (
+
+                <div className="detail-pre-analysis">
                   <div className="detail-meta-row">
                     <div className="meta-item">
                       <span className="meta-label">Owner</span>
-                      <span className="meta-value">{selected.owner ?? "Unknown"}</span>
+                      <span className="meta-value">{selected.owner ?? "—"}</span>
                     </div>
                     <div className="meta-item">
                       <span className="meta-label">Version</span>
@@ -476,150 +572,25 @@ export default function PagesPage() {
                     </div>
                   </div>
 
-                  {/* AI Analysis section */}
-                  {isAnalyzing ? (
-                    <div className="detail-analyze-cta">
-                      <div className="summary-label">AI Analysis</div>
-                      <button className="btn-analyze" disabled>
-                        <span className="spinner" /> Analyzing…
-                      </button>
-                    </div>
-                  ) : analysis ? (
-                    <>
-                      <div className="summary-label-row">
-                        <span className="summary-label">AI Analysis</span>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          {analysis.cached && (
-                            <span className="cached-badge">Cached</span>
-                          )}
-                          <button
-                            className="btn-reanalyze"
-                            onClick={() => analyzeSelected(true)}
-                            title="Re-fetch from Confluence and re-analyze">
-                            ↻ Re-analyze
-                          </button>
-                          <button
-                            className="btn-mark-reviewed"
-                            onClick={() => {
-                              if (!selected) return
-                              fetch(`${API_BASE}/api/analyze/mark-reviewed/${selected.id}`, { method: "POST" })
-                                .then(() => analyzeSelected(true))
-                            }}
-                            title="Mark this page as manually reviewed and healthy">
-                            ✓ Mark Reviewed
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Healthy state banner */}
-                      {analysis.is_healthy ? (
-                        <div className="detail-healthy-banner">
-                          <span className="detail-healthy-icon">✓</span>
-                          <div>
-                            <div className="detail-healthy-title">This page is healthy</div>
-                            <div className="detail-healthy-sub">
-                              No issues detected · {analysis.summary}
-                            </div>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="detail-summary">
-                          <p>{analysis.summary}</p>
-                        </div>
-                      )}
-
-                      {/* Resolved issues (previously fixed) */}
-                      {analysis.resolved_issues && analysis.resolved_issues.length > 0 && (
-                        <div className="detail-resolved">
-                          <div className="summary-label">Previously fixed</div>
-                          <div className="resolved-list">
-                            {analysis.resolved_issues.map((r, i) => (
-                              <div key={i} className="resolved-row">
-                                <span className="resolved-check">✓</span>
-                                <div>
-                                  <span className="resolved-title">{r.title}</span>
-                                  <span className="resolved-how"> — {r.resolution}</span>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Remaining issues */}
-                      {analysis.issues.length > 0 && (
-                        <div className="detail-issues">
-                          <div className="summary-label">Issues detected</div>
-                          <div className="issues-list">
-                            {analysis.issues.map((issue, i) => {
-                              const sev = SEV[issue.severity] ?? SEV.low
-                              const needsHuman = !!issue.needs_human_intervention
-                              return (
-                                <div key={i} className={`issue-card${needsHuman ? " issue-card-flagged" : ""}`} {...(i === 0 ? { 'data-tour': 'issue-card' } : {})}>
-                                  <div className="issue-card-top">
-                                    <span className="issue-title">
-                                      {needsHuman && <span className="issue-flag-icon" title="Needs manual input">⚑</span>}
-                                      {issue.title}
-                                    </span>
-                                    <span className="sev-pill" style={{ background: sev.bg, color: sev.color }}>
-                                      {sev.label}
-                                    </span>
-                                  </div>
-                                  <p className="issue-desc">{issue.description}</p>
-                                  {needsHuman ? (
-                                    <p className="issue-human-note">
-                                      Needs manual input — edit directly in Confluence (e.g. correct contact, owner, or internal reference).
-                                    </p>
-                                  ) : (
-                                    <p className="issue-suggestion">→ {issue.suggestion}</p>
-                                  )}
-                                </div>
-                              )
-                            })}
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <div className="detail-analyze-cta">
-                      <div className="summary-label">AI Analysis</div>
-                      <p className="analyze-hint">
-                        Run DocAI analysis to detect issues like stale content, missing ownership, and poor structure.
-                      </p>
-                      {analyzeError && (
-                        <div className="modal-error" style={{ marginBottom: 8 }}>
-                          <span>⚠</span> {analyzeError}
-                        </div>
-                      )}
-                      <button
-                        className="btn-analyze"
-                        onClick={() => analyzeSelected()}>
-                        Analyze with DocAI
-                      </button>
-                    </div>
-                  )}
-
-                  {/* CTA to jump to inline view when issues exist */}
-                  {analysis && analysis.issues.length > 0 && (
-                    <div className="detail-content-cta">
-                      <button
-                        className="btn-view-content"
-                        onClick={() => setActiveTab("content")}>
-                        View issues in context →
-                      </button>
-                      <span className="detail-content-hint">
-                        See each issue highlighted directly in the page text
-                      </span>
-                    </div>
-                  )}
+                  <div className="analyze-cta-block">
+                    <div className="analyze-cta-title">AI Analysis</div>
+                    <p className="analyze-cta-desc">
+                      Detect stale content, missing ownership, poor structure, and more.
+                      Results appear inline with the page content.
+                    </p>
+                    {analyzeError && (
+                      <div className="analyze-error">⚠ {analyzeError}</div>
+                    )}
+                    <button
+                      className="btn-analyze"
+                      onClick={() => analyzeSelected()}>
+                      Analyze with DocAI
+                    </button>
+                  </div>
 
                   <div className="detail-actions">
                     {selected.url ? (
-                      <a
-                        href={selected.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="btn-primary">
+                      <a href={selected.url} target="_blank" rel="noreferrer" className="btn-primary">
                         Open in Confluence ↗
                       </a>
                     ) : (
@@ -628,18 +599,7 @@ export default function PagesPage() {
                     <button className="btn-ghost" onClick={() => openEditModal()}>Propose a Fix</button>
                   </div>
                 </div>
-              )}
 
-              {/* ── Content tab ── */}
-              {activeTab === "content" && analysis && (
-                <ContentViewer
-                  key={selected.id}
-                  content={pageContents[selected.id] ?? ""}
-                  issues={analysis.issues as ContentIssue[]}
-                  pageTitle={selected.title}
-                  onCreateProposal={issue => openEditModal(ISSUE_TO_EDIT[issue.type], issue)}
-                  onProposeAll={proposeAll}
-                />
               )}
             </div>
           )
@@ -665,7 +625,7 @@ export default function PagesPage() {
                   Review and approve them in the Approvals tab.
                 </p>
                 <div className="modal-success-actions">
-                  <a href="/approvals" className="btn-primary modal-link-btn">Go to Approvals ↗</a>
+                  <a href="/proposals" className="btn-primary modal-link-btn">Go to Proposals ↗</a>
                   <button className="btn-ghost" onClick={closeModal}>Close</button>
                 </div>
               </div>
@@ -679,7 +639,6 @@ export default function PagesPage() {
                   <button className="modal-close" onClick={closeModal}>✕</button>
                 </div>
 
-                {/* Human-review callout */}
                 <div className="modal-review-callout">
                   <span className="modal-review-icon">👤</span>
                   <span>
@@ -691,7 +650,6 @@ export default function PagesPage() {
 
                 <div className="modal-body">
 
-                  {/* ── Section 1: Fixable issues summary ── */}
                   {analysis && analysis.issues.length > 0 && !selectedIssueForFix && (() => {
                     const fixable = analysis.issues.filter(i => !i.needs_human_intervention)
                     const human   = analysis.issues.filter(i =>  i.needs_human_intervention)
@@ -745,7 +703,6 @@ export default function PagesPage() {
                     )
                   })()}
 
-                  {/* ── Section 2: General improvement ── */}
                   <div className={`modal-section${analysis && analysis.issues.filter(i => !i.needs_human_intervention).length > 0 && !selectedIssueForFix ? " modal-section-dimmed" : ""}`}>
                     <div className="modal-section-label">
                       {analysis && analysis.issues.length > 0

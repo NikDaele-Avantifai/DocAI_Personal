@@ -6,6 +6,29 @@ import "./OverviewPage.css"
 
 const API_BASE = "http://localhost:8000"
 
+type IssueCategory = "stale" | "empty" | "no_owner" | "generic_title" | "needs_review"
+
+type AtRiskPage = {
+  id: string
+  title: string
+  space_key: string
+  flags: IssueCategory[]
+  word_count: number
+  last_modified: string | null
+  is_healthy: boolean
+}
+
+type SweepResult = {
+  id: number
+  status: string
+  pages_scanned: number
+  pages_healthy: number
+  pages_at_risk: number
+  issue_counts: Record<IssueCategory, number>
+  at_risk_pages: AtRiskPage[]
+  completed_at: string | null
+}
+
 type ActivityEntry = {
   id: string
   page_title: string
@@ -27,6 +50,30 @@ type Stats = {
   recent_activity: ActivityEntry[]
 }
 
+const ISSUE_META: Record<string, { label: string; color: string; bg: string }> = {
+  stale:         { label: "Stale content",        color: "#92400e", bg: "#fef3c7" },
+  empty:         { label: "Insufficient content",  color: "#991b1b", bg: "#fee2e2" },
+  no_owner:      { label: "No owner assigned",     color: "#374151", bg: "#f3f4f6" },
+  generic_title: { label: "Generic title",         color: "#1e40af", bg: "#dbeafe" },
+  needs_review:  { label: "Has open issues",       color: "#065f46", bg: "#d1fae5" },
+}
+
+const FLAG_SHORT: Record<string, string> = {
+  stale:         "Stale",
+  empty:         "Empty",
+  no_owner:      "No owner",
+  generic_title: "Generic",
+  needs_review:  "Review",
+}
+
+const DECISION_STYLE: Record<string, { color: string; bg: string; label: string }> = {
+  approved:    { color: "#065f46", bg: "#d1fae5", label: "Approved"    },
+  rejected:    { color: "#991b1b", bg: "#fee2e2", label: "Rejected"    },
+  applied:     { color: "#1e40af", bg: "#dbeafe", label: "Applied"     },
+  rolled_back: { color: "#92400e", bg: "#fef3c7", label: "Rolled back" },
+  pending:     { color: "#374151", bg: "#f3f4f6", label: "Pending"     },
+}
+
 const ACTION_LABEL: Record<string, string> = {
   archive:        "Archive",
   add_summary:    "Add Summary",
@@ -36,13 +83,10 @@ const ACTION_LABEL: Record<string, string> = {
   rewrite:        "Rewrite",
   remove_section: "Remove Section",
   rename:         "Rename",
+  targeted_fix:   "Targeted fix",
 }
 
-const DECISION_STYLE: Record<string, { color: string; bg: string; icon: string }> = {
-  approved: { color: "#006644", bg: "rgba(0,102,68,0.08)",  icon: "✓" },
-  rejected: { color: "#BF2600", bg: "rgba(191,38,0,0.08)",  icon: "✕" },
-  applied:  { color: "#0747A6", bg: "rgba(7,71,166,0.08)",  icon: "↗" },
-}
+const ISSUE_ORDER: IssueCategory[] = ["empty", "stale", "no_owner", "generic_title", "needs_review"]
 
 function relativeTime(iso: string | null): string {
   if (!iso) return ""
@@ -55,49 +99,65 @@ function relativeTime(iso: string | null): string {
   return `${Math.floor(h / 24)}d ago`
 }
 
-function calcHealthScore(stats: Stats): number {
-  // Each unresolved proposal deducts points; each healthy page adds a bonus.
-  // This means fixing pages visibly improves the score.
-  const healthyBonus = (stats.pages_healthy ?? 0) * 2
-  const score = 100
-    - (stats.proposals_pending * 2)
-    - (stats.proposals_awaiting_apply * 3)
-    + healthyBonus
+function calcHealthScore(stats: Stats, sweep: SweepResult | null): number {
+  let score = 100
+  score -= stats.proposals_pending * 2
+  score -= stats.proposals_awaiting_apply * 3
+  score += (stats.pages_healthy ?? 0) * 2
+  // Factor content quality from latest sweep (up to -25 pts)
+  if (sweep && sweep.pages_scanned > 0) {
+    const riskRatio = sweep.pages_at_risk / sweep.pages_scanned
+    score -= Math.round(riskRatio * 25)
+  }
   return Math.max(0, Math.min(100, score))
-}
-
-function healthColor(score: number): string {
-  if (score >= 80) return "var(--green)"
-  if (score >= 50) return "var(--amber)"
-  return "var(--red)"
-}
-
-function healthLabel(score: number): string {
-  if (score >= 80) return "Healthy"
-  if (score >= 50) return "Needs Attention"
-  return "Critical"
 }
 
 export default function OverviewPage() {
   const navigate = useNavigate()
   const { startTour, showWelcome, dismissWelcome } = useTour()
   const [stats, setStats] = useState<Stats | null>(null)
+  const [sweep, setSweep] = useState<SweepResult | null>(null)
   const [loading, setLoading] = useState(true)
+  const [sweepLoading, setSweepLoading] = useState(false)
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/stats/`)
-      .then(r => r.json())
-      .then(setStats)
-      .catch(() => setStats(null))
-      .finally(() => setLoading(false))
+    Promise.all([
+      fetch(`${API_BASE}/api/stats/`).then(r => r.json()),
+      fetch(`${API_BASE}/api/sweep/latest`).then(r => r.json()).catch(() => null),
+    ]).then(([s, sw]) => {
+      setStats(s)
+      setSweep(sw || null)
+    }).catch(() => {}).finally(() => setLoading(false))
   }, [])
 
-  const score = stats ? calcHealthScore(stats) : 0
-  const color = healthColor(score)
+  async function runSweep() {
+    setSweepLoading(true)
+    try {
+      const result = await fetch(`${API_BASE}/api/sweep/run`, { method: "POST" }).then(r => r.json())
+      setSweep(result)
+      const newStats = await fetch(`${API_BASE}/api/stats/`).then(r => r.json())
+      setStats(newStats)
+    } catch {}
+    setSweepLoading(false)
+  }
+
+  const score = stats ? calcHealthScore(stats, sweep) : 0
+  const scoreColor = score >= 80 ? "#16a34a" : score >= 50 ? "#d97706" : "#dc2626"
+  const scoreLabel = score >= 80 ? "Healthy" : score >= 50 ? "Needs attention" : "Critical"
+  const hasAtRisk = sweep && sweep.pages_at_risk > 0
+
+  const topIssues = sweep
+    ? Object.entries(sweep.issue_counts)
+        .filter(([, v]) => v > 0)
+        .sort(([, a], [, b]) => b - a)
+        .slice(0, 3)
+        .map(([k, v]) => `${v} ${ISSUE_META[k]?.label.toLowerCase() ?? k}`)
+    : []
 
   return (
-    <div className="overview-layout">
+    <div className="ov-page">
 
+      {/* Welcome banner */}
       {showWelcome && (
         <div className="tour-welcome-banner">
           <span className="tour-welcome-icon">👋</span>
@@ -111,130 +171,256 @@ export default function OverviewPage() {
         </div>
       )}
 
-      {/* ── Health Score Banner ── */}
-      <div data-tour="health-score" className="health-banner" style={{ borderLeftColor: color }}>
-        <div className="health-banner-left">
-          <div className="health-score-ring" style={{ "--score-color": color } as React.CSSProperties}>
-            {loading
-              ? <span className="health-score-num" style={{ color: "var(--text-3)" }}>—</span>
-              : <span className="health-score-num" style={{ color }}>{score}</span>
-            }
-            <span className="health-score-label">/ 100</span>
-          </div>
-          <div>
-            <div className="health-title">
-              Documentation Health
-              {!loading && stats && (
-                <span className="health-badge" style={{
-                  background: color === "var(--green)" ? "var(--green-bg)" : color === "var(--amber)" ? "var(--amber-bg)" : "var(--red-bg)",
-                  color: color === "var(--green)" ? "var(--green-text)" : color === "var(--amber)" ? "var(--amber-text)" : "var(--red-text)",
-                }}>
-                  {healthLabel(score)}
-                </span>
-              )}
-            </div>
-            {stats && (
-              <p className="health-sub">
-                {stats.pages_total} pages ·{" "}
-                <span style={{ color: "var(--green-text, #15803d)", fontWeight: 500 }}>
-                  {stats.pages_healthy ?? 0} healthy
-                </span>
-                {" "}·{" "}{stats.proposals_pending} issue{stats.proposals_pending !== 1 ? "s" : ""} open ·{" "}
-                {stats.proposals_awaiting_apply} awaiting apply
-              </p>
-            )}
-          </div>
+      {/* Page header */}
+      <div className="ov-header">
+        <div className="ov-header-left">
+          <h1 className="ov-title">Workspace Overview</h1>
+          {sweep?.completed_at && !sweepLoading && (
+            <span className="ov-last-sweep">Last sweep {relativeTime(sweep.completed_at)}</span>
+          )}
         </div>
-
-        <div className="health-bar-wrap">
-          <div className="health-bar-track">
-            <div
-              className="health-bar-fill"
-              style={{ width: loading ? "0%" : `${score}%`, background: color }}
-            />
-          </div>
-        </div>
+        <button
+          className={`btn-sweep${sweepLoading ? " running" : ""}`}
+          onClick={runSweep}
+          disabled={sweepLoading}>
+          <span className={`btn-sweep-icon${sweepLoading ? " spin" : ""}`}>↻</span>
+          {sweepLoading ? "Scanning…" : "Run Sweep"}
+        </button>
       </div>
 
-      {/* ── Stats Row ── */}
-      <div data-tour="stats-row" className="ov-stats-row">
-        {[
-          { label: "Total Pages",       value: stats?.pages_total ?? "—",             delta: `${stats?.spaces_total ?? 0} spaces · ${stats?.pages_healthy ?? 0} healthy`, accent: "#5B73FF", path: "/pages"    },
-          { label: "Issues Found",      value: stats?.proposals_pending ?? "—",        delta: "pending review",                               accent: "#FF991F", path: "/proposals" },
-          { label: "Awaiting Apply",    value: stats?.proposals_awaiting_apply ?? "—", delta: "approved proposals",                           accent: "#818CF8", path: "/proposals" },
-          { label: "Changes Applied",   value: stats?.changes_applied ?? "—",          delta: "published to Confluence",                      accent: "#36B37E", path: "/audit"    },
-        ].map((card, i) => (
-          <button
-            key={i}
-            className="ov-stat-card"
-            onClick={() => navigate(card.path)}>
-            <div className="ov-stat-accent" style={{ background: card.accent }} />
-            {loading
-              ? <>
-                  <div className="skel-val" style={{ height: 36, width: "50%", background: "var(--surface-3)", borderRadius: 4, marginBottom: 8 }} />
-                  <div className="skel-lbl" style={{ height: 12, width: "70%", background: "var(--surface-3)", borderRadius: 3 }} />
-                </>
-              : <>
-                  <div className="ov-stat-value" style={{ color: card.accent }}>{card.value}</div>
-                  <div className="ov-stat-label">{card.label}</div>
-                  <div className="ov-stat-delta">{card.delta}</div>
-                </>
-            }
+      {/* Alert banner — only when sweep has found problems */}
+      {!loading && hasAtRisk && sweep && (
+        <div className="ov-alert">
+          <div className="ov-alert-left">
+            <span className="ov-alert-dot" />
+            <span className="ov-alert-msg">
+              <strong>{sweep.pages_at_risk} page{sweep.pages_at_risk !== 1 ? "s" : ""} need attention</strong>
+              {topIssues.length > 0 && <span className="ov-alert-detail"> — {topIssues.join(" · ")}</span>}
+            </span>
+          </div>
+          <button className="ov-alert-cta" onClick={() => navigate("/pages")}>
+            Review pages →
           </button>
-        ))}
+        </div>
+      )}
+
+      {/* Metrics */}
+      <div data-tour="stats-row" className="ov-metrics">
+
+        <div data-tour="health-score" className="ov-metric ov-metric-primary">
+          <div className="ov-metric-header">
+            <span className="ov-metric-label">Health Score</span>
+            <span className="ov-metric-badge" style={{ color: scoreColor, background: `${scoreColor}14` }}>
+              {loading ? "—" : scoreLabel}
+            </span>
+          </div>
+          <div className="ov-metric-value" style={{ color: scoreColor }}>
+            {loading ? "—" : score}<span className="ov-metric-denom">/100</span>
+          </div>
+          <div className="ov-metric-bar">
+            <div className="ov-metric-bar-fill" style={{ width: `${score}%`, background: scoreColor }} />
+          </div>
+          <div className="ov-metric-sub">
+            {stats ? `${stats.pages_healthy} of ${stats.pages_total} pages healthy` : "Loading…"}
+          </div>
+        </div>
+
+        <div className="ov-metric ov-metric-clickable" onClick={() => navigate("/pages")}>
+          <div className="ov-metric-label">Pages at Risk</div>
+          <div className="ov-metric-value" style={{ color: sweep?.pages_at_risk ? "#dc2626" : "var(--text-1)" }}>
+            {loading ? "—" : (sweep?.pages_at_risk ?? "—")}
+          </div>
+          <div className="ov-metric-sub">
+            {sweep ? `out of ${sweep.pages_scanned} scanned` : "Run a sweep to check"}
+          </div>
+        </div>
+
+        <div className="ov-metric ov-metric-clickable" onClick={() => navigate("/proposals")}>
+          <div className="ov-metric-label">Open Issues</div>
+          <div className="ov-metric-value" style={{ color: stats?.proposals_pending ? "#d97706" : "var(--text-1)" }}>
+            {loading ? "—" : (stats?.proposals_pending ?? 0)}
+          </div>
+          <div className="ov-metric-sub">
+            {stats?.proposals_awaiting_apply
+              ? `${stats.proposals_awaiting_apply} awaiting apply`
+              : "pending review"}
+          </div>
+        </div>
+
+        <div className="ov-metric ov-metric-clickable" onClick={() => navigate("/audit")}>
+          <div className="ov-metric-label">Changes Applied</div>
+          <div className="ov-metric-value">{loading ? "—" : (stats?.changes_applied ?? 0)}</div>
+          <div className="ov-metric-sub">published to Confluence</div>
+        </div>
       </div>
 
-      {/* ── Two column ── */}
+      {/* Main grid */}
       <div className="ov-grid">
 
-        {/* Recent Activity */}
-        <div data-tour="activity-feed" className="ov-card">
-          <div className="ov-card-header">
-            <div>
-              <h2 className="ov-card-title">Recent Activity</h2>
-              <p className="ov-card-sub">Latest decisions from the approval workflow</p>
+        {/* ── Left column ── */}
+        <div className="ov-left">
+
+          {/* Content Quality / Sweep results */}
+          <div className="ov-card">
+            <div className="ov-card-head">
+              <div>
+                <div className="ov-card-title">Content Quality</div>
+                <div className="ov-card-sub">
+                  {sweep
+                    ? `${sweep.pages_scanned} pages indexed · ${sweep.pages_healthy} healthy`
+                    : "Index your workspace to see content quality signals"}
+                </div>
+              </div>
+              {!sweep && !sweepLoading && (
+                <button className="btn-sweep-sm" onClick={runSweep}>Run Sweep</button>
+              )}
+              {sweepLoading && <span className="ov-card-badge-scanning">Scanning…</span>}
             </div>
-            {stats && <span className="ov-card-badge">{stats.decisions_made} total</span>}
+
+            {!sweep && !sweepLoading && (
+              <div className="ov-empty-sweep">
+                <div className="ov-empty-sweep-icon">◎</div>
+                <div className="ov-empty-sweep-title">No sweep data yet</div>
+                <div className="ov-empty-sweep-desc">
+                  A quick sweep checks every page for stale content, missing owners, and
+                  structural issues — no AI credits required. Takes seconds.
+                </div>
+              </div>
+            )}
+
+            {sweepLoading && (
+              <div className="ov-sweep-progress">
+                <div className="ov-sweep-bar">
+                  <div className="ov-sweep-bar-fill" />
+                </div>
+                <div className="ov-sweep-progress-label">Indexing workspace…</div>
+              </div>
+            )}
+
+            {sweep && !sweepLoading && (
+              <div className="ov-issue-breakdown">
+                {ISSUE_ORDER.map(cat => {
+                  const count = sweep.issue_counts[cat] ?? 0
+                  const pct = sweep.pages_scanned > 0
+                    ? Math.max((count / sweep.pages_scanned) * 100, count > 0 ? 3 : 0)
+                    : 0
+                  const meta = ISSUE_META[cat]
+                  return (
+                    <div key={cat} className="ov-issue-row">
+                      <div className="ov-issue-label">{meta.label}</div>
+                      <div
+                        className="ov-issue-count"
+                        style={{ color: count > 0 ? meta.color : "var(--text-3)" }}>
+                        {count}
+                      </div>
+                      <div className="ov-issue-bar-track">
+                        <div
+                          className="ov-issue-bar-fill"
+                          style={{ width: `${pct}%`, background: count > 0 ? meta.color : "transparent" }}
+                        />
+                      </div>
+                    </div>
+                  )
+                })}
+
+                <div className="ov-issue-footer">
+                  <span className="ov-issue-stat">
+                    <span className="ov-dot ov-dot-green" />
+                    {sweep.pages_healthy} healthy
+                  </span>
+                  <span className="ov-issue-stat">
+                    <span className="ov-dot ov-dot-red" />
+                    {sweep.pages_at_risk} need attention
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
 
-          <div className="ov-activity-list">
-            {loading && Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} style={{ padding: "8px 0" }}>
-                <SkeletonRow />
+          {/* At-risk pages */}
+          {sweep && sweep.at_risk_pages.length > 0 && (
+            <div className="ov-card">
+              <div className="ov-card-head">
+                <div>
+                  <div className="ov-card-title">Pages Needing Attention</div>
+                  <div className="ov-card-sub">Sorted by severity — most issues first</div>
+                </div>
+                <span className="ov-card-badge">{sweep.pages_at_risk}</span>
               </div>
+              <div className="ov-risk-list">
+                {sweep.at_risk_pages.slice(0, 8).map(page => (
+                  <div
+                    key={page.id}
+                    className="ov-risk-row"
+                    onClick={() => navigate("/pages")}>
+                    <div className="ov-risk-left">
+                      <div className="ov-risk-title">{page.title}</div>
+                      <div className="ov-risk-meta">
+                        <span className="ov-space-badge">{page.space_key}</span>
+                        {page.word_count < 50 && (
+                          <span className="ov-risk-words">{page.word_count} words</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="ov-risk-flags">
+                      {page.flags.slice(0, 3).map(f => (
+                        <span
+                          key={f}
+                          className="ov-flag"
+                          style={{ color: ISSUE_META[f]?.color, background: ISSUE_META[f]?.bg }}>
+                          {FLAG_SHORT[f] ?? f}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Right column ── */}
+        <div className="ov-right">
+
+          {/* Recent Decisions */}
+          <div data-tour="activity-feed" className="ov-card">
+            <div className="ov-card-head">
+              <div>
+                <div className="ov-card-title">Recent Decisions</div>
+                <div className="ov-card-sub">Latest from the approval workflow</div>
+              </div>
+              {stats && <span className="ov-card-badge">{stats.decisions_made} total</span>}
+            </div>
+
+            {loading && Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} style={{ padding: "10px 18px" }}><SkeletonRow /></div>
             ))}
 
             {!loading && (!stats || stats.recent_activity.length === 0) && (
-              <div className="ov-empty">
-                <span className="ov-empty-icon">📋</span>
-                <p>No activity yet</p>
-                <p className="ov-empty-hint">Approve or reject a proposal to see it here.</p>
-                <button className="ov-quick-btn" onClick={() => navigate("/proposals")}>
+              <div className="ov-empty-state">
+                <div className="ov-empty-icon">📋</div>
+                <div className="ov-empty-title">No decisions yet</div>
+                <div className="ov-empty-desc">Approve or reject a proposal to see activity here.</div>
+                <button className="ov-text-link" onClick={() => navigate("/proposals")}>
                   Go to Proposals →
                 </button>
               </div>
             )}
 
-            {!loading && stats && stats.recent_activity.slice(0, 10).map(item => {
-              const ds = DECISION_STYLE[item.decision] ?? DECISION_STYLE.approved
+            {!loading && stats && stats.recent_activity.map(item => {
+              const ds = DECISION_STYLE[item.decision] ?? DECISION_STYLE.pending
               return (
                 <div key={item.id} className="ov-activity-row">
-                  <div className="ov-activity-left">
-                    <div className="ov-activity-icon" style={{ color: ds.color, background: ds.bg }}>
-                      {ds.icon}
-                    </div>
-                    <div className="ov-activity-info">
-                      <span className="ov-activity-page">{item.page_title}</span>
-                      <span className="ov-activity-meta">
-                        {ACTION_LABEL[item.action] ?? item.action}
-                        {item.space_key ? ` · ${item.space_key}` : ""}
-                        {item.reviewed_by ? ` · by ${item.reviewed_by}` : ""}
-                      </span>
+                  <div className="ov-activity-body">
+                    <div className="ov-activity-title">{item.page_title}</div>
+                    <div className="ov-activity-meta">
+                      {ACTION_LABEL[item.action] ?? item.action}
+                      {item.reviewed_by ? ` · ${item.reviewed_by}` : ""}
                     </div>
                   </div>
                   <div className="ov-activity-right">
-                    <span className="ov-pill" style={{ background: ds.bg, color: ds.color }}>
-                      {item.decision}
+                    <span className="ov-pill" style={{ color: ds.color, background: ds.bg }}>
+                      {ds.label}
                     </span>
                     <span className="ov-time">{relativeTime(item.updated_at)}</span>
                   </div>
@@ -242,30 +428,29 @@ export default function OverviewPage() {
               )
             })}
           </div>
-        </div>
 
-        {/* Right column */}
-        <div className="ov-side">
-
-          {/* Top Issues */}
+          {/* Milestones */}
           <div className="ov-card">
-            <div className="ov-card-header">
-              <h2 className="ov-card-title">Status</h2>
+            <div className="ov-card-head">
+              <div className="ov-card-title">Milestones</div>
             </div>
-            <div className="ov-steps">
+            <div className="ov-milestones">
               {[
-                { done: (stats?.pages_total ?? 0) > 0,      label: "Workspace synced",             path: "/pages"       },
-                { done: (stats?.decisions_made ?? 0) > 0,   label: "First decision made",          path: "/proposals"   },
-                { done: (stats?.changes_applied ?? 0) > 0,  label: "Change applied to Confluence", path: "/audit"       },
-                { done: (stats?.pages_healthy ?? 0) > 0,    label: "First page marked healthy",    path: "/pages"       },
+                { done: (stats?.pages_total ?? 0) > 0,     label: "Workspace synced",              path: "/pages"     },
+                { done: !!sweep,                             label: "First sweep complete",           path: null         },
+                { done: (stats?.decisions_made ?? 0) > 0,  label: "First decision made",            path: "/proposals" },
+                { done: (stats?.changes_applied ?? 0) > 0, label: "Change published to Confluence", path: "/audit"     },
+                { done: (stats?.pages_healthy ?? 0) > 0,   label: "First page marked healthy",      path: "/pages"     },
               ].map((step, i) => (
                 <div
                   key={i}
-                  className={`ov-step-row${step.done ? " done" : ""}`}
-                  onClick={() => navigate(step.path)}>
-                  <div className="ov-step-check">{step.done ? "✓" : ""}</div>
-                  <span>{step.label}</span>
-                  <span className="ov-step-arrow">→</span>
+                  className={`ov-milestone${step.done ? " done" : ""}${step.path ? " clickable" : ""}`}
+                  onClick={() => step.path && navigate(step.path)}>
+                  <div className={`ov-milestone-check${step.done ? " done" : ""}`}>
+                    {step.done ? "✓" : ""}
+                  </div>
+                  <span className="ov-milestone-label">{step.label}</span>
+                  {step.path && <span className="ov-milestone-arrow">→</span>}
                 </div>
               ))}
             </div>
@@ -273,38 +458,25 @@ export default function OverviewPage() {
 
           {/* Quick Actions */}
           <div className="ov-card">
-            <div className="ov-card-header">
-              <h2 className="ov-card-title">Quick Actions</h2>
+            <div className="ov-card-head">
+              <div className="ov-card-title">Quick Actions</div>
             </div>
             <div className="ov-quick-actions">
-              <button className="ov-quick-action-btn" onClick={() => navigate("/pages")}>
-                <span className="ov-qa-icon">⟳</span>
-                <div>
-                  <div className="ov-qa-label">Sync Confluence</div>
-                  <div className="ov-qa-sub">Fetch latest pages</div>
-                </div>
-              </button>
-              <button className="ov-quick-action-btn" onClick={() => navigate("/duplicates")}>
-                <span className="ov-qa-icon">⊕</span>
-                <div>
-                  <div className="ov-qa-label">Duplicate Scan</div>
-                  <div className="ov-qa-sub">Find similar pages</div>
-                </div>
-              </button>
-              <button className="ov-quick-action-btn" onClick={() => navigate("/batch-rename")}>
-                <span className="ov-qa-icon">✎</span>
-                <div>
-                  <div className="ov-qa-label">Batch Rename</div>
-                  <div className="ov-qa-sub">Fix page titles</div>
-                </div>
-              </button>
-              <button className="ov-quick-action-btn" onClick={() => navigate("/proposals")}>
-                <span className="ov-qa-icon">✓</span>
-                <div>
-                  <div className="ov-qa-label">Review Proposals</div>
-                  <div className="ov-qa-sub">{stats?.proposals_pending ?? 0} pending</div>
-                </div>
-              </button>
+              {[
+                { icon: "↻", label: "Sync Confluence",  sub: "Fetch latest pages",                    action: () => navigate("/pages")      },
+                { icon: "◎", label: "Run Sweep",         sub: "Index and healthcheck workspace",        action: runSweep                       },
+                { icon: "⊕", label: "Duplicate Scan",   sub: "Find similar pages",                    action: () => navigate("/duplicates")  },
+                { icon: "✎", label: "Batch Rename",      sub: "Fix page titles",                       action: () => navigate("/batch-rename")},
+                { icon: "✓", label: "Review Proposals", sub: `${stats?.proposals_pending ?? 0} pending`, action: () => navigate("/proposals") },
+              ].map((qa, i) => (
+                <button key={i} className="ov-qa-btn" onClick={qa.action}>
+                  <span className="ov-qa-icon">{qa.icon}</span>
+                  <div>
+                    <div className="ov-qa-label">{qa.label}</div>
+                    <div className="ov-qa-sub">{qa.sub}</div>
+                  </div>
+                </button>
+              ))}
             </div>
           </div>
         </div>

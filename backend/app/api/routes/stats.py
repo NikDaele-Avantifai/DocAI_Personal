@@ -32,6 +32,12 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
         1 for p in _proposals.values() if p["status"] == "approved"
     )
 
+    # Most recent sync time
+    last_space = (await db.execute(
+        select(Space).order_by(Space.last_synced.desc()).limit(1)
+    )).scalar_one_or_none()
+    last_sync = last_space.last_synced.isoformat() if (last_space and last_space.last_synced) else None
+
     # Recent audit activity (last 8 entries)
     recent_rows = (await db.execute(
         select(AuditEntry).order_by(AuditEntry.updated_at.desc()).limit(8)
@@ -58,5 +64,6 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
         "proposals_awaiting_apply": approved_pending_apply,
         "changes_applied": applied_count,
         "decisions_made": reviewed_count,
+        "last_sync": last_sync,
         "recent_activity": recent_activity,
     }

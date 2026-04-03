@@ -1,150 +1,232 @@
-.overview-layout {
-  padding: 28px 32px;
-  max-width: 1100px;
+/* ═══════════════════════════════════════════════════════
+   Overview Page — Professional enterprise layout
+   ═══════════════════════════════════════════════════════ */
+
+.ov-page {
+  padding: 24px 32px 40px;
+  max-width: 1200px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 16px;
 }
 
-/* ── Health Banner ── */
-.health-banner {
-  background: var(--bg-white);
-  border: 1px solid var(--border);
-  border-left: 4px solid var(--green);
-  border-radius: 10px;
-  padding: 22px 26px;
-  box-shadow: var(--shadow-sm);
+/* ── Page header ── */
+.ov-header {
   display: flex;
   align-items: center;
-  gap: 32px;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 4px;
 }
 
-.health-banner-left {
+.ov-header-left {
   display: flex;
-  align-items: center;
-  gap: 20px;
-  flex-shrink: 0;
+  align-items: baseline;
+  gap: 12px;
 }
 
-.health-score-ring {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
+.ov-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-1);
+  letter-spacing: -0.3px;
 }
 
-.health-score-num {
-  font-size: 38px;
-  font-weight: 800;
-  font-family: 'Syne', sans-serif;
-  line-height: 1;
-}
-
-.health-score-label {
+.ov-last-sweep {
   font-size: 12px;
   color: var(--text-3);
 }
 
-.health-title {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text-1);
+/* ── Sweep button (primary CTA) ── */
+.btn-sweep {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 16px;
+  background: var(--text-1);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+}
+
+.btn-sweep:hover:not(:disabled) { opacity: 0.82; }
+.btn-sweep:disabled { opacity: 0.55; cursor: default; }
+
+.btn-sweep-icon { font-size: 14px; display: inline-block; line-height: 1; }
+.btn-sweep-icon.spin { animation: btn-spin 0.75s linear infinite; }
+
+@keyframes btn-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ── Alert banner ── */
+.ov-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 16px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 7px;
+}
+
+.ov-alert-left {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 6px;
+  min-width: 0;
 }
 
-.health-badge {
-  font-size: 10.5px;
-  font-weight: 700;
-  padding: 3px 9px;
-  border-radius: 10px;
+.ov-alert-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #d97706;
+  box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.18);
+  flex-shrink: 0;
 }
 
-.health-sub {
-  font-size: 12.5px;
-  color: var(--text-3);
-}
-
-.health-bar-wrap { flex: 1; }
-
-.health-bar-track {
-  height: 8px;
-  background: var(--surface-3);
-  border-radius: 4px;
+.ov-alert-msg {
+  font-size: 13px;
+  color: var(--text-1);
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.health-bar-fill {
-  height: 100%;
-  border-radius: 4px;
-  transition: width 0.8s ease;
+.ov-alert-detail {
+  font-weight: 400;
+  color: var(--text-2);
 }
 
-/* ── Stats Row ── */
-.ov-stats-row {
+.ov-alert-cta {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.ov-alert-cta:hover { text-decoration: underline; }
+
+/* ── Metrics row ── */
+.ov-metrics {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 14px;
+  gap: 12px;
 }
 
-.ov-stat-card {
+.ov-metric {
   background: var(--bg-white);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 18px 20px 20px;
+  padding: 16px 18px 18px;
   box-shadow: var(--shadow-sm);
-  position: relative;
-  overflow: hidden;
-  text-align: left;
-  cursor: pointer;
-  transition: box-shadow 0.15s, border-color 0.15s;
-  font-family: inherit;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.ov-stat-card:hover {
+.ov-metric-primary {
+  /* slightly elevated */
+  box-shadow: var(--shadow-md);
+}
+
+.ov-metric-clickable {
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.ov-metric-clickable:hover {
   border-color: var(--border-2);
   box-shadow: var(--shadow-md);
 }
 
-.ov-stat-accent {
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 3px;
-}
-
-.ov-stat-value {
-  font-size: 32px;
-  font-weight: 800;
-  font-family: 'Syne', sans-serif;
-  line-height: 1;
-  margin-top: 10px;
+.ov-metric-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin-bottom: 6px;
 }
 
-.ov-stat-label {
-  font-size: 13px;
+.ov-metric-label {
+  font-size: 11.5px;
   font-weight: 600;
-  color: var(--text-1);
-  margin-bottom: 3px;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
-.ov-stat-delta {
+.ov-metric-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.ov-metric-value {
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--text-1);
+  line-height: 1;
+  letter-spacing: -0.5px;
+  margin-bottom: 2px;
+}
+
+.ov-metric-denom {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-3);
+  margin-left: 2px;
+}
+
+.ov-metric-bar {
+  height: 3px;
+  background: var(--surface-3);
+  border-radius: 2px;
+  overflow: hidden;
+  margin: 4px 0 6px;
+}
+
+.ov-metric-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.8s cubic-bezier(.4, 0, .2, 1);
+}
+
+.ov-metric-sub {
   font-size: 11.5px;
   color: var(--text-3);
+  margin-top: 2px;
 }
 
-/* ── Two column grid ── */
+/* ── Two-column grid ── */
 .ov-grid {
   display: grid;
-  grid-template-columns: 1fr 360px;
-  gap: 20px;
+  grid-template-columns: 1fr 340px;
+  gap: 16px;
   align-items: start;
 }
 
-.ov-side {
+.ov-left,
+.ov-right {
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -159,24 +241,24 @@
   overflow: hidden;
 }
 
-.ov-card-header {
+.ov-card-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  padding: 18px 20px 14px;
+  padding: 15px 18px 12px;
   border-bottom: 1px solid var(--border);
   gap: 12px;
 }
 
 .ov-card-title {
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 700;
   color: var(--text-1);
   margin-bottom: 2px;
 }
 
 .ov-card-sub {
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--text-3);
 }
 
@@ -186,55 +268,268 @@
   color: var(--text-2);
   background: var(--surface-2);
   border: 1px solid var(--border);
-  padding: 3px 9px;
+  padding: 2px 8px;
   border-radius: 10px;
   white-space: nowrap;
+  flex-shrink: 0;
+  margin-top: 1px;
 }
 
-/* Activity list */
-.ov-activity-list {
-  padding: 4px 0;
+.ov-card-badge-scanning {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-light);
+  padding: 2px 8px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  animation: ov-pulse 1.4s ease-in-out infinite;
 }
 
-.ov-activity-row {
+@keyframes ov-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.45; }
+}
+
+/* ── Empty sweep state ── */
+.ov-empty-sweep {
+  padding: 40px 24px 36px;
+  text-align: center;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  padding: 10px 20px;
+  gap: 8px;
+}
+
+.ov-empty-sweep-icon {
+  font-size: 28px;
+  color: var(--text-3);
+  line-height: 1;
+  margin-bottom: 4px;
+  opacity: 0.6;
+}
+
+.ov-empty-sweep-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.ov-empty-sweep-desc {
+  font-size: 12.5px;
+  color: var(--text-3);
+  max-width: 320px;
+  line-height: 1.55;
+}
+
+/* Small sweep button (inside card header) */
+.btn-sweep-sm {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-light);
+  border: none;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  flex-shrink: 0;
+  transition: opacity 0.15s;
+  margin-top: 1px;
+}
+
+.btn-sweep-sm:hover { opacity: 0.8; }
+
+/* ── Sweep progress ── */
+.ov-sweep-progress {
+  padding: 36px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   gap: 12px;
-  transition: background 0.1s;
 }
-.ov-activity-row:hover { background: var(--surface-2); }
 
-.ov-activity-left {
+.ov-sweep-bar {
+  width: 100%;
+  max-width: 260px;
+  height: 3px;
+  background: var(--surface-3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.ov-sweep-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  animation: sweep-indeterminate 1.4s ease-in-out infinite;
+}
+
+@keyframes sweep-indeterminate {
+  0%   { width: 0%;   margin-left: 0%; }
+  50%  { width: 65%;  margin-left: 10%; }
+  100% { width: 0%;   margin-left: 100%; }
+}
+
+.ov-sweep-progress-label {
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+
+/* ── Issue breakdown ── */
+.ov-issue-breakdown {
+  padding: 8px 0 0;
+}
+
+.ov-issue-row {
+  display: grid;
+  grid-template-columns: 1fr 30px 100px;
+  align-items: center;
+  gap: 14px;
+  padding: 9px 18px;
+}
+
+.ov-issue-label {
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+.ov-issue-count {
+  font-size: 12.5px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.ov-issue-bar-track {
+  height: 4px;
+  background: var(--surface-3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.ov-issue-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.7s cubic-bezier(.4, 0, .2, 1);
+}
+
+.ov-issue-footer {
+  display: flex;
+  gap: 20px;
+  padding: 12px 18px 14px;
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.ov-issue-stat {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-width: 0;
+  gap: 6px;
 }
 
-.ov-activity-icon {
-  width: 30px; height: 30px;
-  border-radius: 7px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 12px; font-weight: 700;
+.ov-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
   flex-shrink: 0;
 }
 
-.ov-activity-info {
+.ov-dot-green { background: #16a34a; }
+.ov-dot-red   { background: #dc2626; }
+
+/* ── At-risk pages list ── */
+.ov-risk-list { padding: 4px 0; }
+
+.ov-risk-row {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 18px;
+  gap: 12px;
+  cursor: pointer;
+  transition: background 0.1s;
 }
 
-.ov-activity-page {
+.ov-risk-row:hover { background: var(--surface-2); }
+
+.ov-risk-left {
+  min-width: 0;
+  flex: 1;
+}
+
+.ov-risk-title {
   font-size: 13px;
   font-weight: 500;
   color: var(--text-1);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  margin-bottom: 3px;
+}
+
+.ov-risk-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.ov-space-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  padding: 1px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.2px;
+}
+
+.ov-risk-words {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.ov-risk-flags {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.ov-flag {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+/* ── Recent Activity ── */
+.ov-activity-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 18px;
+  gap: 12px;
+  transition: background 0.1s;
+}
+
+.ov-activity-row:hover { background: var(--surface-2); }
+
+.ov-activity-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.ov-activity-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 2px;
 }
 
 .ov-activity-meta {
@@ -252,9 +547,8 @@
 .ov-pill {
   font-size: 10.5px;
   font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 10px;
-  text-transform: capitalize;
+  padding: 2px 7px;
+  border-radius: 4px;
 }
 
 .ov-time {
@@ -263,101 +557,113 @@
   white-space: nowrap;
 }
 
-/* Empty state */
-.ov-empty {
+/* ── Empty state ── */
+.ov-empty-state {
+  padding: 32px 20px;
+  text-align: center;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding: 36px 24px;
-  text-align: center;
+  gap: 4px;
 }
 
-.ov-empty-icon { font-size: 28px; opacity: 0.5; }
-.ov-empty p { font-size: 13.5px; color: var(--text-2); font-weight: 500; }
-.ov-empty-hint { font-size: 12px !important; color: var(--text-3) !important; font-weight: 400 !important; }
+.ov-empty-icon  { font-size: 22px; margin-bottom: 4px; opacity: 0.45; }
+.ov-empty-title { font-size: 13.5px; font-weight: 600; color: var(--text-2); }
+.ov-empty-desc  { font-size: 12px; color: var(--text-3); }
 
-.ov-quick-btn {
+.ov-text-link {
   font-size: 12.5px;
   color: var(--accent);
-  background: none; border: none;
-  cursor: pointer; font-family: inherit;
-  margin-top: 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  margin-top: 6px;
+  padding: 0;
 }
 
-/* Steps / workflow */
-.ov-steps { padding: 8px 0; }
+.ov-text-link:hover { text-decoration: underline; }
 
-.ov-step-row {
+/* ── Milestones ── */
+.ov-milestones { padding: 4px 0; }
+
+.ov-milestone {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 20px;
-  cursor: pointer;
-  transition: background 0.1s;
-  font-size: 13px;
-  color: var(--text-2);
-}
-
-.ov-step-row:hover { background: var(--surface-2); }
-
-.ov-step-row.done { color: var(--text-1); }
-
-.ov-step-check {
-  width: 20px; height: 20px;
-  border-radius: 50%;
-  border: 2px solid var(--border-2);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 11px; font-weight: 700;
-  flex-shrink: 0;
+  gap: 10px;
+  padding: 9px 18px;
+  font-size: 12.5px;
   color: var(--text-3);
+  transition: background 0.1s;
 }
 
-.ov-step-row.done .ov-step-check {
-  border-color: var(--green);
-  background: var(--green-bg);
-  color: var(--green-text);
+.ov-milestone.done    { color: var(--text-2); }
+.ov-milestone.clickable { cursor: pointer; }
+.ov-milestone.clickable:hover { background: var(--surface-2); }
+
+.ov-milestone-check {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+  color: transparent;
+  transition: all 0.15s;
 }
 
-.ov-step-arrow {
-  margin-left: auto;
+.ov-milestone-check.done {
+  border-color: #16a34a;
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.ov-milestone-label { flex: 1; }
+
+.ov-milestone-arrow {
   color: var(--text-3);
   font-size: 12px;
 }
 
-/* Quick actions */
-.ov-quick-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px 0;
-}
+/* ── Quick actions ── */
+.ov-quick-actions { padding: 4px 0; }
 
-.ov-quick-action-btn {
+.ov-qa-btn {
+  width: 100%;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 20px;
-  background: none; border: none;
-  cursor: pointer; text-align: left;
+  gap: 10px;
+  padding: 9px 18px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
   font-family: inherit;
   transition: background 0.1s;
-  border-radius: 0;
 }
-.ov-quick-action-btn:hover { background: var(--surface-2); }
+
+.ov-qa-btn:hover { background: var(--surface-2); }
 
 .ov-qa-icon {
-  width: 32px; height: 32px;
-  border-radius: 8px;
-  background: var(--accent-light);
-  color: var(--accent);
-  font-size: 14px;
-  display: flex; align-items: center; justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
 }
 
 .ov-qa-label {
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--text-1);
 }

@@ -529,6 +529,23 @@ export default function ContentViewer({
     )
   }
 
+  // ── No issues ─────────────────────────────────────────────────────────────
+  if (issues.length === 0) {
+    return (
+      <div className="cv-wrapper">
+        <div className="cv-no-issues-bar">
+          <span className="cv-no-issues-dot" />
+          No issues detected — page content looks good
+        </div>
+        <div className="cv-left cv-left-full">
+          {sections.map(section => (
+            <div key={section.index} className="cv-para">{section.text}</div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="cv-wrapper">
@@ -567,14 +584,6 @@ export default function ContentViewer({
             </button>
           )}
         </div>
-      </div>
-
-      {/* ── Purpose bar ── */}
-      <div className="cv-purpose-bar">
-        <span className="cv-purpose-icon">📄</span>
-        <span className="cv-purpose-main">Mirrored page · Issues are highlighted inline</span>
-        <span className="cv-purpose-sep">·</span>
-        <span className="cv-purpose-hint">Click "Propose Fix" on any issue to stage a change</span>
       </div>
 
       {/* ── Two-column area ── */}

@@ -29,6 +29,7 @@ interface SpaceTreeProps {
   onPageSelect: (page: PageNode) => void
   selectedPageId: string | null
   refreshKey: number
+  sweepFlags?: Record<string, string[]>
 }
 
 function countPages(nodes: PageNode[]): number {
@@ -40,14 +41,18 @@ function PageTreeItem({
   depth,
   onSelect,
   selectedId,
+  sweepFlags,
 }: {
   page: PageNode
   depth: number
   onSelect: (p: PageNode) => void
   selectedId: string | null
+  sweepFlags?: Record<string, string[]>
 }) {
   const [expanded, setExpanded] = useState(depth === 0)
   const hasChildren = page.children.length > 0
+  const flags = sweepFlags?.[page.id] ?? []
+  const hasIssues = flags.length > 0
 
   return (
     <div>
@@ -69,9 +74,14 @@ function PageTreeItem({
         <span className="tree-page-icon">{hasChildren ? "⊟" : "◫"}</span>
         <span className="tree-page-title">{page.title}</span>
 
-        {page.is_healthy && !hasChildren && (
+        {hasIssues ? (
+          <span
+            className={`tree-issue-dot${flags.length >= 2 ? " tree-issue-dot-red" : " tree-issue-dot-amber"}`}
+            title="Issues detected by sweep — analyze to find exact fixes"
+          />
+        ) : (page.is_healthy && !hasChildren && (
           <span className="tree-healthy-check" title="No issues detected">✓</span>
-        )}
+        ))}
         {hasChildren && (
           <span className="tree-count">{page.children.length}</span>
         )}
@@ -86,6 +96,7 @@ function PageTreeItem({
               depth={depth + 1}
               onSelect={onSelect}
               selectedId={selectedId}
+              sweepFlags={sweepFlags}
             />
           ))}
         </div>
@@ -98,6 +109,7 @@ export default function SpaceTree({
   onPageSelect,
   selectedPageId,
   refreshKey,
+  sweepFlags,
 }: SpaceTreeProps) {
   const [spaces, setSpaces] = useState<Space[]>([])
   const [expandedSpaces, setExpandedSpaces] = useState<Set<string>>(new Set())
@@ -205,6 +217,7 @@ export default function SpaceTree({
                       depth={0}
                       onSelect={onPageSelect}
                       selectedId={selectedPageId}
+                      sweepFlags={sweepFlags}
                     />
                   ))
                 )}

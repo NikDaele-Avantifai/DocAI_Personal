@@ -39,6 +39,7 @@ async def init_db() -> None:
     from app.models.snapshot import Snapshot                            # noqa: F401 — registers Snapshot
     from app.models.page_analysis import PageAnalysis                   # noqa: F401 — registers PageAnalysis
     from app.models.analysis_settings import WorkspaceSettings          # noqa: F401 — registers WorkspaceSettings
+    from app.models.sweep import WorkspaceSweep                          # noqa: F401 — registers WorkspaceSweep
 
     try:
         async with engine.begin() as conn:
