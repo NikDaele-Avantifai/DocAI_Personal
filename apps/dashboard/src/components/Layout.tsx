@@ -47,6 +47,7 @@ export default function Layout() {
   const [lastSync, setLastSync] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [notifCount, setNotifCount] = useState(0)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const profileRef = useRef<HTMLDivElement>(null)
   const { startTour, isDemoMode } = useTour()
 
@@ -85,6 +86,13 @@ export default function Layout() {
     return () => document.removeEventListener("mousedown", handleClick)
   }, [profileOpen])
 
+  // Listen for auto-collapse signal from analysis completion
+  useEffect(() => {
+    function handleCollapse() { setSidebarCollapsed(true) }
+    window.addEventListener("docai:sidebarcollapse", handleCollapse)
+    return () => window.removeEventListener("docai:sidebarcollapse", handleCollapse)
+  }, [])
+
   async function handleSync() {
     setSyncing(true)
     try {
@@ -98,71 +106,69 @@ export default function Layout() {
 
   return (
     <div className="layout">
+      {/* Spacer holds the sidebar's width in flow so main content doesn't shift on hover */}
+      <div className={`sidebar-spacer${sidebarCollapsed ? " collapsed" : ""}`} />
+
       {/* ── Sidebar ── */}
-      <aside className="sidebar">
+      <aside className={`sidebar${sidebarCollapsed ? " collapsed" : ""}`}>
         {/* Logo */}
         <div className="sidebar-logo">
           <div className="logo-mark">D</div>
           <span className="logo-text">DocAI</span>
           <span className="logo-badge">Beta</span>
-        </div>
-
-        {/* Search */}
-        <div className="sidebar-search">
           <button
-            className="sidebar-search-btn"
-            onClick={() => {
-              const ev = new CustomEvent("docai:opensearch")
-              window.dispatchEvent(ev)
-            }}>
-            <span className="sidebar-search-icon">🔍</span>
-            Search…
-            <span className="sidebar-search-shortcut">⌘K</span>
+            className="sidebar-collapse-btn"
+            onClick={() => setSidebarCollapsed(v => !v)}
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}>
+            {sidebarCollapsed ? "›" : "‹"}
           </button>
         </div>
 
         {/* Main nav */}
         <nav className="sidebar-nav">
-          <div className="nav-section-label">Workspace</div>
+          {/* Workspace section label — removed from render */}
+          {/* <div className="nav-section-label">Workspace</div> */}
+
           {WORKSPACE_NAV.map(({ to, icon, label }) => (
             <NavLink
               key={to}
               to={to}
-              className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}>
+              className={({ isActive }) =>
+                `nav-item${isActive ? " active" : ""}${to === "/duplicates" ? " nav-zone-break" : ""}`
+              }>
               <span className="nav-icon">{icon}</span>
-              <span>{label}</span>
+              <span className="nav-label">{label}</span>
               {label === "Proposals" && pendingCount > 0 && (
                 <span className="nav-badge">{pendingCount}</span>
               )}
             </NavLink>
           ))}
 
-          <div className="nav-section-label" style={{ marginTop: 8 }}>Tools</div>
-          {TOOLS_NAV.map(({ to, icon, label, disabled }) =>
-            disabled || !to ? (
-              <div key={label} className="nav-item-disabled">
-                <span className="nav-icon">{icon}</span>
-                <span>{label}</span>
-                <span style={{
-                  marginLeft: "auto", fontSize: 9, fontWeight: 700,
-                  color: "var(--amber-text)", background: "var(--amber-bg)",
-                  padding: "2px 6px", borderRadius: 3, textTransform: "uppercase",
-                  letterSpacing: "0.3px"
-                }}>Soon</span>
-              </div>
-            ) : (
-              <NavLink
-                key={to}
-                to={to}
-                className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}>
-                <span className="nav-icon">{icon}</span>
-                <span>{label}</span>
-              </NavLink>
-            )
-          )}
+          {/* Tools section label — removed from render */}
+          {/* <div className="nav-section-label">Tools</div> */}
+
+          {/* Batch Rename — zone break above */}
+          <NavLink
+            to="/batch-rename"
+            className={({ isActive }) => `nav-item nav-zone-break${isActive ? " active" : ""}`}>
+            <span className="nav-icon">✎</span>
+            <span className="nav-label">Batch Rename</span>
+          </NavLink>
+
+          {/* Restructure — removed from render, routing preserved in TOOLS_NAV */}
+          {/* <div className="nav-item-disabled">
+            <span className="nav-icon">⊞</span>
+            <span>Restructure</span>
+          </div> */}
+
+          {/* Compliance — removed from render, routing preserved in TOOLS_NAV */}
+          {/* <div className="nav-item-disabled">
+            <span className="nav-icon">⛨</span>
+            <span>Compliance</span>
+          </div> */}
         </nav>
 
-        {/* Footer */}
+        {/* Footer — user identity only */}
         <div className="sidebar-footer">
           <div className="sidebar-footer-top">
             <div
@@ -174,33 +180,6 @@ export default function Layout() {
             <div className="sidebar-user-info">
               <div className="sidebar-user-name">{userName}</div>
               <div className="sidebar-user-role">{userRole}</div>
-            </div>
-          </div>
-          <div className="sidebar-footer-actions">
-            <div className="api-status">
-              <div className="status-dot" />
-              <span>API Connected</span>
-            </div>
-            <div style={{ display: "flex", gap: 4 }}>
-              <button
-                className="sidebar-icon-btn"
-                title="Notifications"
-                onClick={() => {
-                  const ev = new CustomEvent("docai:opennotif")
-                  window.dispatchEvent(ev)
-                }}>
-                🔔
-                {notifCount > 0 && <span className="sidebar-notif-badge" />}
-              </button>
-              <button
-                className="tour-trigger-btn"
-                title="Start product tour"
-                onClick={startTour}>
-                ?
-              </button>
-              <NavLink to="/settings" className="sidebar-icon-btn" title="Settings">
-                ⚙
-              </NavLink>
             </div>
           </div>
         </div>
@@ -253,6 +232,14 @@ export default function Layout() {
               </span>
             ))}
           </div>
+
+          {/* Search — moved from sidebar */}
+          <button
+            className="topbar-search"
+            onClick={() => window.dispatchEvent(new CustomEvent("docai:opensearch"))}>
+            <span className="topbar-search-icon">🔍</span>
+            <span className="topbar-search-placeholder">Search pages...</span>
+          </button>
 
           {isDemoMode && <span className="tour-demo-badge">Demo</span>}
 

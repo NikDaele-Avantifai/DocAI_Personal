@@ -374,8 +374,6 @@ export default function ContentViewer({
     return blocks
   }, [sections, sectionIssueMap])
 
-  // All clean groups start collapsed
-  const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set())
   const [createdProposals, setCreatedProposals] = useState<Set<string>>(new Set())
   const [activeKey, setActiveKey] = useState<string | null>(null)
 
@@ -478,28 +476,6 @@ export default function ContentViewer({
     return () => ro.disconnect()
   }, [calculatePositions])
 
-  // Also recalculate when groups expand/collapse (paragraph positions shift)
-  useLayoutEffect(() => {
-    calculatePositions()
-  }, [expandedGroups, calculatePositions])
-
-  // ── Controls ──────────────────────────────────────────────────────────────
-  const allGroupIndices = useMemo(
-    () => renderBlocks.filter((b): b is CleanGroup => b.kind === "group").map(b => b.groupIndex),
-    [renderBlocks]
-  )
-
-  function collapseAll() { setExpandedGroups(new Set()) }
-  function expandAll()   { setExpandedGroups(new Set(allGroupIndices)) }
-
-  function toggleGroup(idx: number) {
-    setExpandedGroups(prev => {
-      const next = new Set(prev)
-      if (next.has(idx)) next.delete(idx); else next.add(idx)
-      return next
-    })
-  }
-
   function handlePropose(issue: Issue) {
     setCreatedProposals(prev => new Set([...prev, issueKey(issue)]))
     onCreateProposal(issue)
@@ -573,8 +549,6 @@ export default function ContentViewer({
           </span>
         </div>
         <div className="cv-header-actions">
-          <button className="cv-ctrl-btn" onClick={collapseAll}>Collapse all</button>
-          <button className="cv-ctrl-btn" onClick={expandAll}>Expand all</button>
           {issues.length > 0 && (
             <button
               className={`cv-propose-all-btn${allProposed ? " cv-propose-all-done" : ""}`}
@@ -596,15 +570,9 @@ export default function ContentViewer({
         <div className="cv-left" ref={leftColRef}>
           {renderBlocks.map(block => {
             if (block.kind === "group") {
-              const isExpanded = expandedGroups.has(block.groupIndex)
               return (
                 <div key={`group-${block.groupIndex}`}>
-                  <div
-                    className="cv-group-toggle"
-                    onClick={() => toggleGroup(block.groupIndex)}>
-                    {isExpanded ? "▼" : "▶"}
-                  </div>
-                  {isExpanded && block.sections.map(section => (
+                  {block.sections.map(section => (
                     <div key={section.index} className="cv-para">{section.text}</div>
                   ))}
                 </div>

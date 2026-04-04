@@ -1,20 +1,20 @@
 .pages-layout {
-    display: grid;
-    grid-template-columns: 360px 1fr;
-    height: 100vh;
-  }
-  
-  .pages-panel {
-    background: var(--bg-white);
-    border-right: 1px solid var(--border);
-    display: flex; flex-direction: column; overflow: hidden;
-  }
-  
-  .pages-header {
-    padding: 16px 16px 12px;
-    border-bottom: 1px solid var(--border);
-    display: flex; flex-direction: column; gap: 10px;
-  }
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  height: 100vh;
+}
+
+.pages-panel {
+  background: var(--bg-white);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+
+.pages-header {
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 10px;
+}
   
   .page-title { font-size: 17px; font-weight: 700; color: var(--text-1); }
   .page-sub { font-size: 12px; color: var(--text-3); margin-top: 2px; }

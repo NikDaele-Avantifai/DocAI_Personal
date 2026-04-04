@@ -1,5 +1,6 @@
 /* ── Floating button ── */
 .chatbot-fab {
+  display: none;
   position: fixed;
   bottom: 24px; right: 24px;
   width: 52px; height: 52px;

@@ -209,7 +209,7 @@ export default function OverviewPage() {
 
         <div data-tour="health-score" className="ov-metric ov-metric-primary">
           <div className="ov-metric-header">
-            <span className="ov-metric-label">Health Score</span>
+            <span className="ov-metric-label">Health score</span>
             <span className="ov-metric-badge" style={{ color: scoreColor, background: `${scoreColor}14` }}>
               {loading ? "—" : scoreLabel}
             </span>
@@ -226,7 +226,7 @@ export default function OverviewPage() {
         </div>
 
         <div className="ov-metric ov-metric-clickable" onClick={() => navigate("/pages")}>
-          <div className="ov-metric-label">Pages at Risk</div>
+          <div className="ov-metric-label">Pages at risk</div>
           <div className="ov-metric-value" style={{ color: sweep?.pages_at_risk ? "#dc2626" : "var(--text-1)" }}>
             {loading ? "—" : (sweep?.pages_at_risk ?? "—")}
           </div>
@@ -236,7 +236,7 @@ export default function OverviewPage() {
         </div>
 
         <div className="ov-metric ov-metric-clickable" onClick={() => navigate("/proposals")}>
-          <div className="ov-metric-label">Open Issues</div>
+          <div className="ov-metric-label">Open issues</div>
           <div className="ov-metric-value" style={{ color: stats?.proposals_pending ? "#d97706" : "var(--text-1)" }}>
             {loading ? "—" : (stats?.proposals_pending ?? 0)}
           </div>
@@ -248,7 +248,7 @@ export default function OverviewPage() {
         </div>
 
         <div className="ov-metric ov-metric-clickable" onClick={() => navigate("/audit")}>
-          <div className="ov-metric-label">Changes Applied</div>
+          <div className="ov-metric-label">Changes applied</div>
           <div className="ov-metric-value">{loading ? "—" : (stats?.changes_applied ?? 0)}</div>
           <div className="ov-metric-sub">published to Confluence</div>
         </div>
@@ -356,7 +356,9 @@ export default function OverviewPage() {
                     <div className="ov-risk-left">
                       <div className="ov-risk-title">{page.title}</div>
                       <div className="ov-risk-meta">
-                        <span className="ov-space-badge">{page.space_key}</span>
+                        {page.space_key && !/^~|^[0-9a-f]{8,}$/i.test(page.space_key) && (
+                          <span className="ov-space-badge">{page.space_key}</span>
+                        )}
                         {page.word_count < 50 && (
                           <span className="ov-risk-words">{page.word_count} words</span>
                         )}
@@ -407,7 +409,7 @@ export default function OverviewPage() {
               </div>
             )}
 
-            {!loading && stats && stats.recent_activity.map(item => {
+            {!loading && stats && stats.recent_activity.slice(0, 4).map(item => {
               const ds = DECISION_STYLE[item.decision] ?? DECISION_STYLE.pending
               return (
                 <div key={item.id} className="ov-activity-row">
@@ -427,6 +429,22 @@ export default function OverviewPage() {
                 </div>
               )
             })}
+
+            {!loading && stats && stats.recent_activity.length > 4 && (
+              <div className="ov-activity-footer">
+                <button className="ov-text-link" onClick={() => navigate("/audit")}>
+                  View all {stats.recent_activity.length} decisions in Audit Log →
+                </button>
+              </div>
+            )}
+
+            {!loading && stats && stats.recent_activity.length > 0 && stats.recent_activity.length <= 4 && (
+              <div className="ov-activity-footer">
+                <button className="ov-text-link" onClick={() => navigate("/audit")}>
+                  View Audit Log →
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Milestones */}

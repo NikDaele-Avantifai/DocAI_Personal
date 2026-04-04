@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import "./PagesPage.css"
 import SpaceTree, { type PageNode } from "../components/SpaceTree"
 import ContentViewer, { type Issue as ContentIssue } from "../components/ContentViewer"
@@ -98,6 +98,8 @@ export default function PagesPage() {
 
   // Per-page content cache (keyed by page ID)
   const [pageContents, setPageContents] = useState<Record<string, string>>({})
+
+  const prevAnalyzingRef = useRef(false)
 
   // Sweep flags (page id → string[] of issue categories)
   const [sweepPageFlags, setSweepPageFlags] = useState<Record<string, string[]>>({})
@@ -328,6 +330,14 @@ export default function PagesPage() {
   const isAnalyzing = selected ? analyzingId === selected.id : false
   const isFolder    = (selected?.children.length ?? 0) > 0
   const pageFlags   = selected ? (sweepPageFlags[selected.id] ?? []) : []
+
+  // Auto-collapse the global sidebar when analysis finishes
+  useEffect(() => {
+    if (prevAnalyzingRef.current && !isAnalyzing && analysis) {
+      window.dispatchEvent(new CustomEvent("docai:sidebarcollapse"))
+    }
+    prevAnalyzingRef.current = isAnalyzing
+  }, [isAnalyzing, analysis])
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
