@@ -28,6 +28,8 @@ class GenerateEditRequest(BaseModel):
     issue_title: str | None = None
     issue_description: str | None = None
     issue_suggestion: str | None = None
+    # v2: exact verbatim text that has the issue (from exactContent field)
+    issue_exact_content: str | None = None
 
 
 EDIT_TYPE_LABELS = {
@@ -75,25 +77,26 @@ Response format:
 Do not invent new facts. Confidence 0-100 based on how clear the improvement is."""
 
 
-TARGETED_FIX_SYSTEM_PROMPT = """You are DocAI. Your only task is to apply ONE precise, targeted fix to a Confluence page.
+TARGETED_FIX_SYSTEM_PROMPT = """You are DocAI. Your only task is to apply ONE precise, surgical fix to a Confluence page.
 
-STRICT RULES — follow every one of these:
-1. Change ONLY what the issue description requires. Read it carefully.
-2. Do NOT rename section headings unless the issue is specifically about renaming.
-3. Do NOT switch bullet style (keep * as *, keep # as #) unless the issue requires it.
-4. Do NOT reorder sections or paragraphs.
-5. Do NOT add, remove, or change blank lines except where the fix directly requires it.
-6. Do NOT change capitalisation, wording, or formatting of any content unrelated to the issue.
-7. Return the FULL page with the one fix applied — everything else must remain identical.
+STRICT RULES — you must follow every one:
+1. If EXACT CONTENT is provided: find that exact string in the page and replace it with the SUGGESTED FIX only. Nothing else changes — not even a single space, comma, or word outside those characters.
+2. If no exact content is provided: read the issue description carefully and change only the minimum text required to fix it.
+3. Do NOT rename section headings unless the issue is specifically about the heading text.
+4. Do NOT switch bullet style (keep * as *, keep # as #) unless the issue requires it.
+5. Do NOT reorder, add, or remove sections or paragraphs.
+6. Do NOT add, remove, or change blank lines except where the fix directly requires it.
+7. Do NOT change capitalisation, wording, tone, or formatting of any content unrelated to the fix.
+8. Return the FULL page content with the one change applied — everything else must be character-for-character identical to the input.
 
-Use the SAME Confluence wiki markup style as the input. Do not introduce a different markup style.
+Think of it as a find-and-replace: you find the exact broken text and swap it for the corrected text. Nothing else moves.
 
-Do not invent new facts. Confidence 0-100 based on how confident you are the fix is correct.
+Use the SAME Confluence wiki markup style as the input.
 
 Respond with ONLY a valid JSON object:
 {
   "new_content": "Full page content with ONLY the targeted change applied",
-  "rationale": "One sentence: exactly what was changed and why",
+  "rationale": "One sentence: exactly which text was changed and what it was changed to",
   "confidence": 85
 }"""
 
@@ -112,6 +115,10 @@ def _build_user_message(request: GenerateEditRequest) -> str:
             msg += f"Detail: {request.issue_description}\n"
         if request.issue_suggestion:
             msg += f"Suggested fix: {request.issue_suggestion}\n"
+        if request.issue_exact_content:
+            msg += f"\n=== EXACT CONTENT TO REPLACE ===\n{request.issue_exact_content}\n"
+            if request.issue_suggestion:
+                msg += f"Replace it with exactly: {request.issue_suggestion}\n"
         # Convert HTML input to wiki markup so Claude echoes wiki markup back
         msg += f"\n=== CURRENT PAGE CONTENT (Confluence wiki markup) ===\n{_html_to_wiki(request.content)}"
         return msg

@@ -42,8 +42,21 @@
   --color-primary-subtle: rgba(37, 99, 235, 0.08);
   --color-border:         #E4E6EA;
   --text-xs:              11px;
+  --text-sm:              12px;
+  --text-md:              15px;
+  --text-lg:              17px;
   --text-base:            14px;
+  --font-normal:          400;
   --font-medium:          500;
+  --font-semibold:        600;
+  --color-text-primary:   #172B4D;
+  --color-text-secondary: #5E6C84;
+  --color-text-muted:     #97A0AF;
+  --color-text-link:      #0052CC;
+  --color-bg-app:         #F7F8FA;
+  --space-3:              12px;
+  --space-4:              16px;
+  --space-5:              20px;
 }
 
 

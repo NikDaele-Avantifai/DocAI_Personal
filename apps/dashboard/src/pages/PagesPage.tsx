@@ -7,12 +7,6 @@ const API_BASE = "http://localhost:8000"
 
 type EditType = "restructure" | "add_summary" | "rewrite" | "remove_section" | "targeted_fix"
 
-type IssueLocation = {
-  section: string
-  quote: string | null
-  line_hint: string
-}
-
 type ResolvedIssue = {
   title: string
   resolution: string
@@ -25,19 +19,7 @@ type AnalysisResult = {
   is_healthy: boolean
   resolved_issues: ResolvedIssue[]
   cached?: boolean
-  issues: {
-    type: string
-    severity: "low" | "medium" | "high"
-    title: string
-    description: string
-    suggestion?: string | null
-    location: IssueLocation | null
-    needs_human_intervention?: boolean
-    requires_human?: boolean
-    human_action_needed?: string | null
-    fixable?: boolean
-    confidence?: number
-  }[]
+  issues: ContentIssue[]
 }
 
 const SEV = {
@@ -47,19 +29,12 @@ const SEV = {
 }
 
 const EDIT_OPTIONS: { type: EditType; label: string; description: string; icon: string }[] = [
-  { type: "add_summary",    label: "Add Summary",    description: "Prepend Overview with owner and last-reviewed date", icon: "≡" },
   { type: "restructure",    label: "Restructure",    description: "Reorganize with clear headings and sections",        icon: "⬡" },
   { type: "rewrite",        label: "Rewrite",        description: "Improve clarity and fix grammar",                   icon: "✎" },
+  { type: "add_summary",    label: "Summarize",      description: "Prepend Overview with owner and last-reviewed date", icon: "≡" },
   { type: "remove_section", label: "Remove Section", description: "Strip a specific outdated section",                 icon: "✕" },
 ]
 
-const ISSUE_TO_EDIT: Record<string, EditType> = {
-  stale:        "rewrite",
-  duplicate:    "remove_section",
-  orphan:       "restructure",
-  unowned:      "add_summary",
-  unstructured: "restructure",
-}
 
 const FLAG_LABEL: Record<string, string> = {
   stale:         "stale content",
@@ -104,8 +79,7 @@ export default function PagesPage() {
   // Sweep flags (page id → string[] of issue categories)
   const [sweepPageFlags, setSweepPageFlags] = useState<Record<string, string[]>>({})
 
-  // Propose-all state
-  const [proposingAll, setProposingAll] = useState(false)
+  // (proposing state is now managed inside ContentViewer)
 
   // Edit modal state
   const [modalOpen, setModalOpen] = useState(false)
@@ -193,34 +167,63 @@ export default function PagesPage() {
     }
   }
 
-  async function proposeAll(issues: ContentIssue[]) {
-    if (!selected || proposingAll) return
-    setProposingAll(true)
-    try {
-      const pageRes = await fetch(`${API_BASE}/api/sync/pages/${selected.id}`)
-      if (!pageRes.ok) throw new Error("Could not fetch page content")
-      const pageData = await pageRes.json()
+  /** Directly submit a targeted fix for a single issue — no modal. */
+  async function createProposal(issue: ContentIssue): Promise<void> {
+    if (!selected) return
+    const pageRes = await fetch(`${API_BASE}/api/sync/pages/${selected.id}`)
+    if (!pageRes.ok) throw new Error("Could not fetch page content")
+    const pageData = await pageRes.json()
 
-      await Promise.all(
-        issues.map(issue =>
-          fetch(`${API_BASE}/api/edit/generate`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              page_id:      selected.id,
-              page_title:   selected.title,
-              content:      pageData.content ?? "",
-              page_version: selected.version,
-              edit_type:    ISSUE_TO_EDIT[issue.type] ?? "restructure",
-              space:        selected.space_key,
-            }),
-          })
-        )
-      )
-    } catch (e) {
-      console.error("Propose all failed:", e)
-    } finally {
-      setProposingAll(false)
+    const res = await fetch(`${API_BASE}/api/edit/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        page_id:             selected.id,
+        page_title:          selected.title,
+        content:             pageData.content ?? "",
+        page_version:        selected.version,
+        edit_type:           "targeted_fix",
+        space:               selected.space_key,
+        issue_title:         issue.title,
+        issue_description:   issue.explanation ?? issue.description ?? "",
+        issue_suggestion:    issue.suggestedFix ?? issue.suggestion,
+        issue_exact_content: issue.exactContent ?? undefined,
+      }),
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.detail ?? `API error ${res.status}`)
+    }
+  }
+
+  async function proposeAll(issues: ContentIssue[]): Promise<void> {
+    if (!selected) return
+    const pageRes = await fetch(`${API_BASE}/api/sync/pages/${selected.id}`)
+    if (!pageRes.ok) throw new Error("Could not fetch page content")
+    const pageData = await pageRes.json()
+
+    const fixable = issues.filter(i => !i.needs_human_intervention)
+    if (fixable.length === 0) return
+
+    // Single proposal that bundles all fixable issues
+    const res = await fetch(`${API_BASE}/api/edit/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        page_id:           selected.id,
+        page_title:        selected.title,
+        content:           pageData.content ?? "",
+        page_version:      selected.version,
+        edit_type:         "targeted_fix",
+        space:             selected.space_key,
+        issue_title:       `Fix all ${fixable.length} detected issue${fixable.length !== 1 ? "s" : ""}`,
+        issue_description: fixable.map(i => i.explanation ?? i.description ?? "").join(" | "),
+        issue_suggestion:  fixable.map(i => i.suggestedFix ?? i.suggestion).filter(Boolean).join(" | "),
+      }),
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.detail ?? `API error ${res.status}`)
     }
   }
 
@@ -263,8 +266,9 @@ export default function PagesPage() {
             edit_type:         "targeted_fix",
             space:             selected.space_key,
             issue_title:       selectedIssueForFix.title,
-            issue_description: selectedIssueForFix.description,
-            issue_suggestion:  selectedIssueForFix.suggestion,
+            issue_description: selectedIssueForFix.explanation ?? selectedIssueForFix.description ?? "",
+            issue_suggestion:  selectedIssueForFix.suggestedFix ?? selectedIssueForFix.suggestion,
+            issue_exact_content: selectedIssueForFix.exactContent ?? undefined,
           }),
         })
         if (!res.ok) {
@@ -275,28 +279,27 @@ export default function PagesPage() {
       } else {
         const fixableIssues = (analysis?.issues ?? []).filter(i => !i.needs_human_intervention)
         if (fixableIssues.length > 0) {
-          const results = await Promise.allSettled(
-            fixableIssues.map(issue =>
-              fetch(`${API_BASE}/api/edit/generate`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  page_id:           selected.id,
-                  page_title:        selected.title,
-                  content:           pageData.content ?? "",
-                  page_version:      selected.version,
-                  edit_type:         "targeted_fix",
-                  space:             selected.space_key,
-                  issue_title:       issue.title,
-                  issue_description: issue.description,
-                  issue_suggestion:  issue.suggestion,
-                }),
-              })
-            )
-          )
-          const succeeded = results.filter(r => r.status === "fulfilled").length
-          if (succeeded === 0) throw new Error("All proposals failed to generate")
-          setCreatedProposalCount(succeeded)
+          // Single proposal bundling all fixable issues
+          const res = await fetch(`${API_BASE}/api/edit/generate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              page_id:           selected.id,
+              page_title:        selected.title,
+              content:           pageData.content ?? "",
+              page_version:      selected.version,
+              edit_type:         "targeted_fix",
+              space:             selected.space_key,
+              issue_title:       `Fix all ${fixableIssues.length} detected issue${fixableIssues.length !== 1 ? "s" : ""}`,
+              issue_description: fixableIssues.map(i => i.explanation ?? i.description ?? "").join(" | "),
+              issue_suggestion:  fixableIssues.map(i => i.suggestedFix ?? i.suggestion).filter(Boolean).join(" | "),
+            }),
+          })
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}))
+            throw new Error(body.detail ?? `API error ${res.status}`)
+          }
+          setCreatedProposalCount(1)
         } else {
           const res = await fetch(`${API_BASE}/api/edit/generate`, {
             method: "POST",
@@ -348,21 +351,8 @@ export default function PagesPage() {
         <div className="pages-header">
           <div>
             <h1 className="page-title">Pages</h1>
-            <p className="page-sub">
-              {lastSynced ? `Last synced ${lastSynced}` : "Confluence workspace mirror"}
-            </p>
+            <p className="page-sub">Confluence workspace mirror</p>
           </div>
-          <button
-            className={`btn-sync${syncing ? " loading" : ""}`}
-            onClick={syncConfluence}
-            disabled={syncing}>
-            {syncing ? (
-              <><span className="spinner-blue" /> Syncing…</>
-            ) : (
-              "⟳ Sync Confluence"
-            )}
-          </button>
-          {syncError && <div className="sync-error">⚠ {syncError}</div>}
         </div>
 
         <SpaceTree
@@ -388,8 +378,10 @@ export default function PagesPage() {
                 <div style={{ minWidth: 0 }}>
                   <h2 className="detail-title">{selected.title}</h2>
                   <p className="detail-meta">
-                    {selected.space_key}
-                    {selected.last_modified && ` · Modified ${fmt(selected.last_modified)}`}
+                    {[
+                      selected.space_key && !/^~|^[0-9a-f]{8,}$/i.test(selected.space_key) ? selected.space_key : null,
+                      selected.last_modified ? `Modified ${fmt(selected.last_modified)}` : null,
+                    ].filter(Boolean).join(' · ')}
                   </p>
                 </div>
               </div>
@@ -457,10 +449,12 @@ export default function PagesPage() {
                   <div style={{ minWidth: 0 }}>
                     <h2 className="detail-title">{selected.title}</h2>
                     <p className="detail-meta">
-                      {selected.space_key}
-                      {selected.last_modified && ` · Modified ${fmt(selected.last_modified)}`}
-                      {` · v${selected.version}`}
-                      {selected.word_count > 0 && ` · ${selected.word_count.toLocaleString()} words`}
+                      {[
+                        selected.space_key && !/^~|^[0-9a-f]{8,}$/i.test(selected.space_key) ? selected.space_key : null,
+                        selected.last_modified ? `Modified ${fmt(selected.last_modified)}` : null,
+                        `v${selected.version}`,
+                        selected.word_count > 0 ? `${selected.word_count.toLocaleString()} words` : null,
+                      ].filter(Boolean).join(' · ')}
                     </p>
                   </div>
                 </div>
@@ -547,8 +541,9 @@ export default function PagesPage() {
                       content={pageContents[selected.id] ?? ""}
                       issues={[]}
                       pageTitle={selected.title}
-                      onCreateProposal={issue => openEditModal(ISSUE_TO_EDIT[issue.type], issue)}
+                      onCreateProposal={createProposal}
                       onProposeAll={proposeAll}
+                      onAction={type => openEditModal(type as EditType)}
                     />
                   </>
                 ) : (
@@ -557,8 +552,9 @@ export default function PagesPage() {
                     content={pageContents[selected.id] ?? ""}
                     issues={analysis.issues as ContentIssue[]}
                     pageTitle={selected.title}
-                    onCreateProposal={issue => openEditModal(ISSUE_TO_EDIT[issue.type], issue)}
+                    onCreateProposal={createProposal}
                     onProposeAll={proposeAll}
+                    onAction={type => openEditModal(type as EditType)}
                   />
                 )
 
@@ -684,7 +680,7 @@ export default function PagesPage() {
                                     </span>
                                     {issue.title}
                                   </div>
-                                  <div className="modal-issue-suggestion">→ {issue.suggestion}</div>
+                                  <div className="modal-issue-suggestion">→ {issue.suggestedFix ?? issue.suggestion}</div>
                                 </div>
                               </div>
                             )

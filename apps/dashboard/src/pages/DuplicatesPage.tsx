@@ -1,8 +1,10 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo } from "react"
 import { useNavigate } from "react-router-dom"
 import "./DuplicatesPage.css"
 
 const API_BASE = "http://localhost:8000"
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 type Space = { key: string; name: string; page_count: number }
 
@@ -27,6 +29,278 @@ type EmbedResult = {
   content_fetch_failed: number
 }
 
+type ParagraphMatch = { aIdx: number; bIdx: number; key: string }
+
+type MirrorConnector = {
+  key: string
+  x1: number; y1: number
+  x2: number; y2: number
+}
+
+// ── Content helpers ───────────────────────────────────────────────────────────
+
+function stripHtml(html: string): string {
+  const withNewlines = html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n\n")
+    .replace(/<\/div>/gi, "\n")
+    .replace(/<\/li>/gi, "\n")
+    .replace(/<\/h[1-6]>/gi, "\n\n")
+    .replace(/<[^>]+>/g, "")
+  const div = document.createElement("div")
+  div.innerHTML = withNewlines
+  return (div.textContent ?? withNewlines).replace(/\n{3,}/g, "\n\n").trim()
+}
+
+function parseParagraphs(raw: string): string[] {
+  return stripHtml(raw)
+    .split(/\n\n+/)
+    .map(s => s.trim())
+    .filter(s => s.length > 0)
+}
+
+function wordOverlap(a: string, b: string): number {
+  const words = (s: string) =>
+    new Set(s.toLowerCase().split(/\W+/).filter(w => w.length > 3))
+  const wa = words(a)
+  const wb = words(b)
+  let count = 0
+  for (const w of wa) if (wb.has(w)) count++
+  return count / Math.max(wa.size, wb.size, 1)
+}
+
+function findMatches(parasA: string[], parasB: string[]): ParagraphMatch[] {
+  const matches: ParagraphMatch[] = []
+  const usedB = new Set<number>()
+  for (let ai = 0; ai < parasA.length; ai++) {
+    if (matches.length >= 6) break
+    if (parasA[ai].length < 25) continue
+    let bestScore = 0.28
+    let bestBi = -1
+    for (let bi = 0; bi < parasB.length; bi++) {
+      if (usedB.has(bi)) continue
+      const score = wordOverlap(parasA[ai], parasB[bi])
+      if (score > bestScore) { bestScore = score; bestBi = bi }
+    }
+    if (bestBi >= 0) {
+      matches.push({ aIdx: ai, bIdx: bestBi, key: `${ai}:${bestBi}` })
+      usedB.add(bestBi)
+    }
+  }
+  return matches
+}
+
+// ── DuplicateMirror ───────────────────────────────────────────────────────────
+
+const TRUNCATE_PARAS = 10
+
+function DuplicateMirror({
+  pair,
+  contentA,
+  contentB,
+  truncated = true,
+  onViewFull,
+}: {
+  pair: DuplicatePair
+  contentA: string
+  contentB: string
+  truncated?: boolean
+  onViewFull?: () => void
+}) {
+  const parasA = useMemo(() => parseParagraphs(contentA), [contentA])
+  const parasB = useMemo(() => parseParagraphs(contentB), [contentB])
+
+  const displayA = useMemo(
+    () => truncated ? parasA.slice(0, TRUNCATE_PARAS) : parasA,
+    [truncated, parasA],
+  )
+  const displayB = useMemo(
+    () => truncated ? parasB.slice(0, TRUNCATE_PARAS) : parasB,
+    [truncated, parasB],
+  )
+
+  const matches   = useMemo(() => findMatches(displayA, displayB), [displayA, displayB])
+  const matchedA  = useMemo(() => new Set(matches.map(m => m.aIdx)), [matches])
+  const matchedB  = useMemo(() => new Set(matches.map(m => m.bIdx)), [matches])
+
+  const containerRef = useRef<HTMLDivElement>(null)
+  const paraARefs    = useRef<Map<number, HTMLDivElement>>(new Map())
+  const paraBRefs    = useRef<Map<number, HTMLDivElement>>(new Map())
+  const [connectors, setConnectors] = useState<MirrorConnector[]>([])
+
+  const calculate = useCallback(() => {
+    if (!containerRef.current) return
+    const rect = containerRef.current.getBoundingClientRect()
+    const lines: MirrorConnector[] = []
+    for (const { aIdx, bIdx, key } of matches) {
+      const elA = paraARefs.current.get(aIdx)
+      const elB = paraBRefs.current.get(bIdx)
+      if (!elA || !elB) continue
+      const rA = elA.getBoundingClientRect()
+      const rB = elB.getBoundingClientRect()
+      lines.push({
+        key,
+        x1: rA.right - rect.left,
+        y1: rA.top - rect.top + rA.height / 2,
+        x2: rB.left - rect.left,
+        y2: rB.top - rect.top + rB.height / 2,
+      })
+    }
+    setConnectors(lines)
+  }, [matches])
+
+  useLayoutEffect(() => { calculate() }, [calculate])
+
+  useEffect(() => {
+    const ro = new ResizeObserver(calculate)
+    if (containerRef.current) ro.observe(containerRef.current)
+    return () => ro.disconnect()
+  }, [calculate])
+
+  const needsFullView =
+    truncated && (parasA.length > TRUNCATE_PARAS || parasB.length > TRUNCATE_PARAS)
+
+  return (
+    <div className="dup-mirror" ref={containerRef}>
+
+      {/* SVG connector overlay */}
+      {connectors.length > 0 && (
+        <svg className="dup-mirror-svg" aria-hidden="true">
+          <defs>
+            <marker id="dup-arrow-a" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+              <circle cx="3" cy="3" r="2.5" fill="var(--color-primary)" fillOpacity="0.35" />
+            </marker>
+          </defs>
+          {connectors.map(c => {
+            const mx = c.x1 + (c.x2 - c.x1) * 0.5
+            return (
+              <g key={c.key}>
+                <path
+                  d={`M ${c.x1} ${c.y1} C ${mx} ${c.y1} ${mx} ${c.y2} ${c.x2} ${c.y2}`}
+                  stroke="var(--color-primary)"
+                  strokeWidth={1.5}
+                  strokeOpacity={0.3}
+                  strokeDasharray="5 3"
+                  fill="none"
+                />
+                <circle cx={c.x1} cy={c.y1} r={3} fill="var(--color-primary)" fillOpacity={0.4} />
+                <circle cx={c.x2} cy={c.y2} r={3} fill="var(--color-primary)" fillOpacity={0.4} />
+              </g>
+            )
+          })}
+        </svg>
+      )}
+
+      {/* Two-column content */}
+      <div className="dup-mirror-cols">
+
+        {/* Page A */}
+        <div className="dup-mirror-col">
+          <div className="dup-mirror-col-header">
+            <span className="dup-mirror-col-label">Page A</span>
+            <span className="dup-mirror-col-title" title={pair.page_a.title}>
+              {pair.page_a.title}
+            </span>
+          </div>
+          <div className="dup-mirror-paras">
+            {displayA.map((text, i) => (
+              <div
+                key={i}
+                ref={el => el
+                  ? paraARefs.current.set(i, el as HTMLDivElement)
+                  : paraARefs.current.delete(i)}
+                className={`dup-mirror-para${matchedA.has(i) ? " dup-mirror-para-match" : ""}`}>
+                {text}
+              </div>
+            ))}
+            {truncated && parasA.length > TRUNCATE_PARAS && (
+              <div className="dup-mirror-more">
+                +{parasA.length - TRUNCATE_PARAS} more section{parasA.length - TRUNCATE_PARAS !== 1 ? "s" : ""}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Page B */}
+        <div className="dup-mirror-col">
+          <div className="dup-mirror-col-header">
+            <span className="dup-mirror-col-label">Page B</span>
+            <span className="dup-mirror-col-title" title={pair.page_b.title}>
+              {pair.page_b.title}
+            </span>
+          </div>
+          <div className="dup-mirror-paras">
+            {displayB.map((text, i) => (
+              <div
+                key={i}
+                ref={el => el
+                  ? paraBRefs.current.set(i, el as HTMLDivElement)
+                  : paraBRefs.current.delete(i)}
+                className={`dup-mirror-para${matchedB.has(i) ? " dup-mirror-para-match" : ""}`}>
+                {text}
+              </div>
+            ))}
+            {truncated && parasB.length > TRUNCATE_PARAS && (
+              <div className="dup-mirror-more">
+                +{parasB.length - TRUNCATE_PARAS} more section{parasB.length - TRUNCATE_PARAS !== 1 ? "s" : ""}
+              </div>
+            )}
+          </div>
+        </div>
+
+      </div>
+
+      {/* View full CTA */}
+      {needsFullView && onViewFull && (
+        <div className="dup-mirror-footer">
+          <span className="dup-mirror-footer-hint">
+            Showing first {TRUNCATE_PARAS} sections of each page
+          </span>
+          <button className="dup-viewfull-btn" onClick={onViewFull}>
+            View full pages side by side →
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── ProposeOptions ────────────────────────────────────────────────────────────
+
+function ProposeOptions({
+  isProposing,
+  onArchive,
+  onRewrite,
+}: {
+  isProposing: boolean
+  onArchive: () => void
+  onRewrite: () => void
+}) {
+  return (
+    <div className="dup-propose-options">
+      <span className="dup-propose-label">Resolve duplicate:</span>
+      <button
+        className={`btn-propose${isProposing ? " loading" : ""}`}
+        onClick={onArchive}
+        disabled={isProposing}>
+        {isProposing
+          ? <><span className="spinner-sm" /> Working…</>
+          : "Archive one page"}
+      </button>
+      <button
+        className={`btn-propose btn-propose-primary${isProposing ? " loading" : ""}`}
+        onClick={onRewrite}
+        disabled={isProposing}>
+        {isProposing
+          ? <><span className="spinner-sm" /> Working…</>
+          : "Rewrite & merge →"}
+      </button>
+    </div>
+  )
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+
 export default function DuplicatesPage() {
   const navigate = useNavigate()
 
@@ -47,13 +321,27 @@ export default function DuplicatesPage() {
   const [scanError, setScanError] = useState<string | null>(null)
 
   // Per-pair proposal state
-  const [proposing, setProposing] = useState<string | null>(null)   // pairKey
+  const [proposing, setProposing] = useState<string | null>(null)
   const [proposed, setProposed]   = useState<Set<string>>(new Set())
   const [proposeError, setProposeError] = useState<string | null>(null)
+
+  // Why similar? panel state
+  const [expandedPairs, setExpandedPairs] = useState<Set<string>>(new Set())
+
+  // Page content cache
+  const [pageContents, setPageContents] = useState<Record<string, string>>({})
+  const [loadingContent, setLoadingContent] = useState<Set<string>>(new Set())
+
+  // Full-view modal
+  const [fullViewPair, setFullViewPair] = useState<DuplicatePair | null>(null)
+
+  // ── Helpers ─────────────────────────────────────────────────────────────────
 
   function pairKey(p: DuplicatePair) {
     return [p.page_a.id, p.page_b.id].sort().join(":")
   }
+
+  // ── Data fetching ────────────────────────────────────────────────────────────
 
   async function loadStatus() {
     try {
@@ -110,7 +398,30 @@ export default function DuplicatesPage() {
     }
   }
 
-  async function proposeMerge(pair: DuplicatePair) {
+  async function fetchPairContent(pair: DuplicatePair) {
+    const key = pairKey(pair)
+    if (pageContents[pair.page_a.id] && pageContents[pair.page_b.id]) return
+    setLoadingContent(prev => new Set(prev).add(key))
+    try {
+      const [aRes, bRes] = await Promise.all([
+        fetch(`${API_BASE}/api/sync/pages/${pair.page_a.id}`).then(r => r.json()),
+        fetch(`${API_BASE}/api/sync/pages/${pair.page_b.id}`).then(r => r.json()),
+      ])
+      setPageContents(prev => ({
+        ...prev,
+        [pair.page_a.id]: aRes.content ?? "",
+        [pair.page_b.id]: bRes.content ?? "",
+      }))
+    } catch { /* silent */ } finally {
+      setLoadingContent(prev => {
+        const n = new Set(prev)
+        n.delete(key)
+        return n
+      })
+    }
+  }
+
+  async function proposeMerge(pair: DuplicatePair, action: "archive" | "rewrite") {
     const key = pairKey(pair)
     setProposing(key)
     setProposeError(null)
@@ -118,7 +429,11 @@ export default function DuplicatesPage() {
       const res = await fetch(`${API_BASE}/api/duplicates/propose-merge`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ page_a_id: pair.page_a.id, page_b_id: pair.page_b.id }),
+        body: JSON.stringify({
+          page_a_id: pair.page_a.id,
+          page_b_id: pair.page_b.id,
+          action,
+        }),
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
@@ -132,6 +447,8 @@ export default function DuplicatesPage() {
     }
   }
 
+  // ── Derived ──────────────────────────────────────────────────────────────────
+
   const coveragePct = status
     ? Math.round((status.embedded_pages / Math.max(status.total_pages, 1)) * 100)
     : 0
@@ -141,13 +458,14 @@ export default function DuplicatesPage() {
     threshold >= 0.82 ? "Balanced — catches clear duplicates" :
                         "Inclusive — may surface partial overlaps"
 
+  // ── Render ───────────────────────────────────────────────────────────────────
+
   return (
     <div data-tour="duplicates-panel" className="dup-layout">
 
       {/* ── Header ── */}
       <div className="dup-header">
         <div>
-          <div className="dup-eyebrow">Tier 2 · Intelligence</div>
           <h1 className="dup-title">Duplicate Detector</h1>
           <p className="dup-sub">
             Find semantically similar pages across your Confluence workspace using AI embeddings
@@ -168,7 +486,7 @@ export default function DuplicatesPage() {
               and runs it through the AI model — takes ~1 s per page.
             </div>
           </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div className="dup-embed-btns">
             <button
               className={`btn-embed${embedding ? " loading" : ""}`}
               onClick={() => runEmbed(false)}
@@ -179,8 +497,7 @@ export default function DuplicatesPage() {
             </button>
             {status && status.embedded_pages > 0 && !embedding && (
               <button
-                className="btn-embed"
-                style={{ background: "var(--surface-2)", color: "var(--text-2)", border: "1px solid var(--border)" }}
+                className="btn-embed btn-embed-ghost"
                 onClick={() => runEmbed(true)}
                 title="Clear all embeddings and re-index from scratch (needed after switching embedding model)">
                 ↺ Re-index All
@@ -189,7 +506,6 @@ export default function DuplicatesPage() {
           </div>
         </div>
 
-        {/* Coverage bar */}
         {status && (
           <div className="dup-coverage">
             <div className="dup-coverage-row">
@@ -199,15 +515,11 @@ export default function DuplicatesPage() {
               <span className="dup-coverage-pct">{coveragePct}%</span>
             </div>
             <div className="dup-coverage-track">
-              <div
-                className="dup-coverage-fill"
-                style={{ width: `${coveragePct}%` }}
-              />
+              <div className="dup-coverage-fill" style={{ width: `${coveragePct}%` }} />
             </div>
           </div>
         )}
 
-        {/* Embed result */}
         {embedResult && (
           <div className="dup-embed-result">
             <span className="embed-stat"><strong>{embedResult.processed}</strong> embedded</span>
@@ -227,12 +539,11 @@ export default function DuplicatesPage() {
       <div className="dup-card">
         <div className="dup-step-label">Step 2</div>
         <div className="dup-card-title">Configure scan</div>
-        <div className="dup-card-sub" style={{ marginBottom: 20 }}>
+        <div className="dup-card-sub dup-card-sub-spaced">
           Restrict to a specific space and tune how similar two pages need to be to count as duplicates.
         </div>
 
         <div className="dup-config-row">
-          {/* Space selector */}
           <div className="dup-field">
             <label className="dup-label">Space</label>
             <select
@@ -246,7 +557,6 @@ export default function DuplicatesPage() {
             </select>
           </div>
 
-          {/* Threshold slider */}
           <div className="dup-field dup-field-grow">
             <label className="dup-label">
               Similarity threshold — <strong>{Math.round(threshold * 100)}%</strong>
@@ -277,7 +587,7 @@ export default function DuplicatesPage() {
         {scanError && <div className="dup-error">⚠ {scanError}</div>}
       </div>
 
-      {/* ── Results ── */}
+      {/* ── Scanning state ── */}
       {scanning && (
         <div className="dup-scanning-state">
           <span className="spinner-lg" />
@@ -285,9 +595,9 @@ export default function DuplicatesPage() {
         </div>
       )}
 
+      {/* ── Results ── */}
       {pairs !== null && !scanning && (
         <>
-          {/* Summary bar */}
           <div className="dup-results-bar">
             <span className="results-count">
               {pairs.length === 0
@@ -309,8 +619,8 @@ export default function DuplicatesPage() {
             {proposed.size > 0 && (
               <>
                 <span className="results-divider" />
-                <button className="results-link" onClick={() => navigate("/approvals")}>
-                  {proposed.size} proposal{proposed.size !== 1 ? "s" : ""} in Approvals ↗
+                <button className="results-link" onClick={() => navigate("/proposals")}>
+                  {proposed.size} proposal{proposed.size !== 1 ? "s" : ""} in Proposals ↗
                 </button>
               </>
             )}
@@ -332,29 +642,36 @@ export default function DuplicatesPage() {
           {pairs.map(pair => {
             const key = pairKey(pair)
             const isProposing = proposing === key
-            const isDone = proposed.has(key)
-            const pct = Math.round(pair.similarity * 100)
+            const isDone      = proposed.has(key)
+            const pct         = Math.round(pair.similarity * 100)
+            const isExpanded  = expandedPairs.has(key)
+            const isLoading   = loadingContent.has(key)
+            const hasContent  = !!(pageContents[pair.page_a.id] && pageContents[pair.page_b.id])
 
             return (
-              <div key={key} className={`dup-pair-card${pair.severity === "exact" || pair.severity === "high" ? " high" : ""}`}>
+              <div
+                key={key}
+                className={`dup-pair-card${pair.severity === "exact" || pair.severity === "high" ? " high" : ""}`}>
+
+                {/* Severity row */}
                 <div className="dup-pair-severity">
                   <span className={`sev-badge sev-${pair.severity}`}>
                     {pair.severity === "exact" ? "Exact" : pair.severity === "high" ? "High" : "Medium"}
                   </span>
                   <span className="sev-pct">{pct}% similar</span>
                   <div className="sev-bar-track">
-                    <div
-                      className={`sev-bar-fill ${pair.severity}`}
-                      style={{ width: `${pct}%` }}
-                    />
+                    <div className={`sev-bar-fill ${pair.severity}`} style={{ width: `${pct}%` }} />
                   </div>
                 </div>
 
+                {/* Page summary boxes */}
                 <div className="dup-pair-pages">
                   <div className="dup-page-box">
                     <div className="dup-page-label">Page A</div>
                     <div className="dup-page-title">{pair.page_a.title}</div>
-                    <div className="dup-page-space">{pair.page_a.space_key}</div>
+                    {!/^~|^[0-9a-f]{8,}$/i.test(pair.page_a.space_key) && (
+                      <div className="dup-page-space">{pair.page_a.space_key}</div>
+                    )}
                     {pair.page_a.url && (
                       <a href={pair.page_a.url} target="_blank" rel="noreferrer" className="dup-page-link">
                         Open in Confluence ↗
@@ -371,7 +688,9 @@ export default function DuplicatesPage() {
                   <div className="dup-page-box">
                     <div className="dup-page-label">Page B</div>
                     <div className="dup-page-title">{pair.page_b.title}</div>
-                    <div className="dup-page-space">{pair.page_b.space_key}</div>
+                    {!/^~|^[0-9a-f]{8,}$/i.test(pair.page_b.space_key) && (
+                      <div className="dup-page-space">{pair.page_b.space_key}</div>
+                    )}
                     {pair.page_b.url && (
                       <a href={pair.page_b.url} target="_blank" rel="noreferrer" className="dup-page-link">
                         Open in Confluence ↗
@@ -380,23 +699,60 @@ export default function DuplicatesPage() {
                   </div>
                 </div>
 
+                {/* Why similar? panel */}
+                <div className="dup-why-section">
+                  <button
+                    className="dup-why-btn"
+                    onClick={() => {
+                      const nowOpen = !isExpanded
+                      setExpandedPairs(prev => {
+                        const next = new Set(prev)
+                        if (next.has(key)) next.delete(key)
+                        else next.add(key)
+                        return next
+                      })
+                      if (nowOpen && !hasContent) fetchPairContent(pair)
+                    }}>
+                    Why similar? {isExpanded ? "↑" : "↓"}
+                  </button>
+
+                  {isExpanded && (
+                    <div className="dup-why-expanded">
+                      {isLoading ? (
+                        <div className="dup-content-loading">
+                          <span className="spinner-sm spinner-dark" />
+                          Loading page content…
+                        </div>
+                      ) : hasContent ? (
+                        <DuplicateMirror
+                          pair={pair}
+                          contentA={pageContents[pair.page_a.id]}
+                          contentB={pageContents[pair.page_b.id]}
+                          truncated
+                          onViewFull={() => setFullViewPair(pair)}
+                        />
+                      ) : (
+                        <div className="dup-content-loading">Content unavailable for this pair.</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer — two propose options */}
                 <div className="dup-pair-footer">
                   {isDone ? (
                     <div className="propose-done">
-                      <span>✓ Merge proposal created</span>
-                      <button className="results-link" onClick={() => navigate("/approvals")}>
-                        Review in Approvals ↗
+                      <span>✓ Proposal created</span>
+                      <button className="results-link" onClick={() => navigate("/proposals")}>
+                        Review in Proposals ↗
                       </button>
                     </div>
                   ) : (
-                    <button
-                      className={`btn-propose${isProposing ? " loading" : ""}`}
-                      onClick={() => proposeMerge(pair)}
-                      disabled={isProposing}>
-                      {isProposing
-                        ? <><span className="spinner-sm" /> Analysing with Claude…</>
-                        : "Propose Merge"}
-                    </button>
+                    <ProposeOptions
+                      isProposing={isProposing}
+                      onArchive={() => proposeMerge(pair, "archive")}
+                      onRewrite={() => proposeMerge(pair, "rewrite")}
+                    />
                   )}
                 </div>
               </div>
@@ -411,10 +767,10 @@ export default function DuplicatesPage() {
           <div className="howto-title">How it works</div>
           <div className="howto-steps">
             {[
-              { n: "1", title: "Index", desc: "AI reads every page and generates a semantic fingerprint (embedding) capturing its meaning." },
-              { n: "2", title: "Scan",  desc: "Embeddings are compared using cosine similarity — pages with overlapping meaning score high." },
+              { n: "1", title: "Index",  desc: "AI reads every page and generates a semantic fingerprint (embedding) capturing its meaning." },
+              { n: "2", title: "Scan",   desc: "Embeddings are compared using cosine similarity — pages with overlapping meaning score high." },
               { n: "3", title: "Review", desc: "Duplicate pairs are ranked by severity. High = near-identical, Medium = significant overlap." },
-              { n: "4", title: "Merge", desc: "Claude analyses both pages and drafts a merge proposal. You review and apply it in Approvals." },
+              { n: "4", title: "Merge",  desc: "Claude analyses both pages and drafts a merge proposal. You review and apply it in Proposals." },
             ].map(step => (
               <div key={step.n} className="howto-step">
                 <div className="howto-step-num">{step.n}</div>
@@ -427,6 +783,64 @@ export default function DuplicatesPage() {
           </div>
         </div>
       )}
+
+      {/* ── Full-view modal ── */}
+      {fullViewPair && (() => {
+        const fKey       = pairKey(fullViewPair)
+        const isProposing = proposing === fKey
+        const isDone      = proposed.has(fKey)
+        const pct         = Math.round(fullViewPair.similarity * 100)
+
+        return (
+          <div className="dup-fullview-overlay" onClick={() => setFullViewPair(null)}>
+            <div className="dup-fullview-modal" onClick={e => e.stopPropagation()}>
+
+              <div className="dup-fullview-header">
+                <div className="dup-fullview-header-left">
+                  <div className="dup-fullview-title">Similarity Analysis</div>
+                  <div className="dup-fullview-meta">
+                    <span className={`sev-badge sev-${fullViewPair.severity}`}>
+                      {fullViewPair.severity === "exact" ? "Exact" : fullViewPair.severity === "high" ? "High" : "Medium"}
+                    </span>
+                    <span className="dup-fullview-pct">{pct}% similar</span>
+                    <span className="dup-fullview-pages">
+                      {fullViewPair.page_a.title} · {fullViewPair.page_b.title}
+                    </span>
+                  </div>
+                </div>
+                <button className="dup-fullview-close" onClick={() => setFullViewPair(null)}>✕</button>
+              </div>
+
+              <div className="dup-fullview-body">
+                <DuplicateMirror
+                  pair={fullViewPair}
+                  contentA={pageContents[fullViewPair.page_a.id] ?? ""}
+                  contentB={pageContents[fullViewPair.page_b.id] ?? ""}
+                  truncated={false}
+                />
+              </div>
+
+              <div className="dup-fullview-footer">
+                {isDone ? (
+                  <div className="propose-done">
+                    <span>✓ Proposal created</span>
+                    <button className="results-link" onClick={() => navigate("/proposals")}>
+                      Review in Proposals ↗
+                    </button>
+                  </div>
+                ) : (
+                  <ProposeOptions
+                    isProposing={isProposing}
+                    onArchive={() => proposeMerge(fullViewPair, "archive")}
+                    onRewrite={() => proposeMerge(fullViewPair, "rewrite")}
+                  />
+                )}
+              </div>
+
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

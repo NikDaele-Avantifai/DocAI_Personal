@@ -106,25 +106,20 @@
     flex-shrink: 0;
   }
 
-  /* Small outline button (Open ↗) */
+  /* Small text button (Open ↗) */
   .btn-outline-sm {
     display: inline-flex;
     align-items: center;
-    height: 30px;
-    padding: 0 12px;
-    font-size: 12px;
-    font-weight: 500;
-    font-family: inherit;
-    color: var(--text-1);
-    background: var(--bg-white);
-    border: 1px solid var(--border);
-    border-radius: 5px;
+    background: none;
+    border: none;
     cursor: pointer;
+    font-size: var(--text-sm);
+    color: var(--text-2);
+    font-family: inherit;
+    padding: 0;
     text-decoration: none;
-    transition: background 0.1s, border-color 0.1s;
-    box-shadow: var(--shadow-sm);
   }
-  .btn-outline-sm:hover { background: var(--surface-2); border-color: var(--border-2); }
+  .btn-outline-sm:hover { text-decoration: underline; }
   .btn-outline-sm:disabled { opacity: 0.5; cursor: default; }
 
   /* ── Sweep hint banner ── */
@@ -166,8 +161,6 @@
   .detail-resolved-label {
     font-size: 10.5px;
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
     color: #15803d;
   }
 
@@ -260,14 +253,12 @@
 
   /* Cached badge */
   .cached-badge {
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--green-text);
-    background: var(--green-bg);
-    border-radius: var(--radius-sm);
-    padding: 2px 7px;
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    color: var(--text-2);
+    background: rgba(0,0,0,0.05);
+    border-radius: var(--radius-full);
+    padding: 2px 8px;
   }
   
   .detail-header { display: flex; align-items: flex-start; gap: 14px; }
@@ -313,22 +304,18 @@
   .summary-label-row .summary-label { margin-bottom: 0; }
 
   .btn-reanalyze {
-    background: transparent; border: none; cursor: pointer;
-    font-size: 11.5px; font-weight: 500; color: var(--text-3);
-    font-family: inherit; padding: 2px 6px; border-radius: 3px;
-    transition: color 0.1s, background 0.1s;
+    background: none; border: none; cursor: pointer;
+    font-size: var(--text-sm); color: var(--text-2);
+    font-family: inherit; padding: 0;
   }
-  .btn-reanalyze:hover { color: var(--accent); background: var(--accent-light); }
+  .btn-reanalyze:hover { text-decoration: underline; }
 
   .btn-mark-reviewed {
-    background: transparent; border: 1px solid rgba(21,128,61,0.3); cursor: pointer;
-    font-size: 11.5px; font-weight: 500; color: var(--green-text, #15803d);
-    font-family: inherit; padding: 2px 8px; border-radius: 3px;
-    transition: color 0.1s, background 0.1s, border-color 0.1s;
+    background: none; border: none; cursor: pointer;
+    font-size: var(--text-sm); color: var(--text-2);
+    font-family: inherit; padding: 0;
   }
-  .btn-mark-reviewed:hover {
-    background: var(--green-bg); border-color: var(--green-text, #15803d);
-  }
+  .btn-mark-reviewed:hover { text-decoration: underline; }
   .detail-summary p { font-size: 13px; color: var(--text-2); line-height: 1.6; }
   
   .detail-issues {

@@ -57,7 +57,15 @@
 
 .cv-header-actions {
   display: flex;
+  align-items: center;
   gap: 6px;
+}
+
+.cv-header-divider {
+  width: 1px;
+  height: 14px;
+  background: var(--border-2);
+  flex-shrink: 0;
 }
 
 .cv-ctrl-btn {
@@ -101,6 +109,12 @@
   flex-shrink: 0;
 }
 
+.cv-no-issues-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
 /* Full-width left column (no sidebar) */
 .cv-left-full {
   padding: 20px 28px;
@@ -132,10 +146,25 @@
 .cv-left {
   flex: 0 0 68%;
   padding: 24px 20px 48px 28px;
-  font-size: 13px;
-  line-height: 1.8;
-  color: var(--text-1);
+  font-size: var(--text-base);
+  font-weight: var(--font-normal);
+  line-height: 1.6;
+  color: var(--color-text-secondary);
   min-width: 0;
+}
+
+.cv-heading-1 {
+  font-size: var(--text-lg);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-3);
+}
+
+.cv-heading-2 {
+  font-size: var(--text-md);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-primary);
+  margin-top: var(--space-5);
 }
 
 /* Clean section group toggle — arrow only, no text */
@@ -180,22 +209,42 @@
 .cv-para-medium { border-left-color: #856404; }
 .cv-para-low    { border-left-color: #0550AE; }
 
-/* Inline highlight marks */
+/* Inline highlight marks — legacy severity colours (kept for compat) */
 mark.cv-mark { padding: 0 1px; border-radius: 2px; }
 mark.cv-mark-high   { background: #FEE2E2; }
 mark.cv-mark-medium { background: #FEF3C7; }
 mark.cv-mark-low    { background: #EFF6FF; }
 
+/* Amber mark — used for text-issue exactContent highlights */
+mark.cv-mark-amber {
+  background: rgba(251, 191, 36, 0.25);
+  border-bottom: 2px solid rgb(251, 191, 36);
+  border-radius: 2px;
+  padding: 0 1px;
+  /* no font-weight, no color change */
+}
+
 /* ── Right column: annotation cards ────────────────────── */
 
-.cv-right {
+.cv-right-panel {
   flex: 0 0 32%;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-app);
+  border-left: 1px solid var(--color-border);
+}
+
+.cv-right-header {
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-primary);
+  padding: var(--space-4) var(--space-4) var(--space-3);
+  flex-shrink: 0;
+}
+
+.cv-right {
+  flex: 1;
   position: relative;
-  /* Subtle vertical rule — drawn as a gradient so it's softer than a hard border */
-  background-image: linear-gradient(to bottom, var(--border), var(--border));
-  background-size: 1px 100%;
-  background-repeat: no-repeat;
-  background-position: 0 0;
   /* min-height set in JS to match left column height */
 }
 
@@ -347,9 +396,9 @@ mark.cv-mark-low    { background: #EFF6FF; }
   font-weight: 600;
   font-family: inherit;
   color: var(--bg-white);
-  background: var(--accent);
+  background: var(--color-primary);
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: opacity 0.1s;
   white-space: nowrap;
@@ -388,4 +437,214 @@ mark.cv-mark-low    { background: #EFF6FF; }
 .cv-empty-hint {
   font-size: 12px;
   color: var(--text-3);
+}
+
+/* ── Toast notification ──────────────────────────────────── */
+
+.cv-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  background: #1a1a1a;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+  z-index: 9999;
+  pointer-events: none;
+  white-space: nowrap;
+  animation: cv-toast-in 0.2s ease;
+}
+
+.cv-toast-check {
+  color: #4ade80;
+  font-size: 13px;
+}
+
+@keyframes cv-toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0);   }
+}
+
+/* ── Button spinners ──────────────────────────────────────── */
+
+.cv-btn-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid rgba(0,0,0,0.15);
+  border-top-color: var(--text-2);
+  border-radius: 50%;
+  animation: cv-spin 0.65s linear infinite;
+  flex-shrink: 0;
+}
+
+.cv-btn-spinner-light {
+  border-color: rgba(255,255,255,0.3);
+  border-top-color: #fff;
+}
+
+@keyframes cv-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Document structure — headings ───────────────────────── */
+
+/* Reset browser heading defaults inside the document column */
+.cv-left h1, .cv-left h2, .cv-left h3,
+.cv-left h4, .cv-left h5, .cv-left h6 { margin: 0; }
+
+.cv-h1 {
+  font-size: var(--text-xl);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-3);
+  line-height: 1.3;
+}
+
+.cv-h2 {
+  font-size: var(--text-lg);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-primary);
+  margin-top: var(--space-5);
+  margin-bottom: var(--space-2);
+  line-height: 1.35;
+}
+
+.cv-h3 {
+  font-size: var(--text-md);
+  font-weight: var(--font-medium);
+  color: var(--color-text-primary);
+  margin-top: var(--space-4);
+  margin-bottom: var(--space-2);
+  line-height: 1.4;
+}
+
+.cv-h4 {
+  font-size: var(--text-base);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-primary);
+  margin-top: var(--space-3);
+  margin-bottom: var(--space-1);
+}
+
+.cv-h5, .cv-h6 {
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-primary);
+  margin-top: var(--space-3);
+  margin-bottom: var(--space-1);
+}
+
+/* ── Document structure — body text ─────────────────────── */
+
+.cv-p {
+  font-size: var(--text-base);
+  font-weight: var(--font-normal);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  margin: 0 0 var(--space-3);
+}
+
+/* ── Document structure — lists ──────────────────────────── */
+
+.cv-ul, .cv-ol {
+  font-size: var(--text-base);
+  font-weight: var(--font-normal);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  margin: 0 0 var(--space-3);
+  padding-left: 1.5em;
+}
+
+.cv-ul { list-style-type: disc; }
+.cv-ol { list-style-type: decimal; }
+
+.cv-li {
+  margin-bottom: var(--space-1);
+}
+
+/* Nested lists */
+.cv-ul .cv-ul, .cv-ul .cv-ol,
+.cv-ol .cv-ul, .cv-ol .cv-ol {
+  margin-top: var(--space-1);
+  margin-bottom: var(--space-1);
+}
+
+/* ── Document structure — blockquote ─────────────────────── */
+
+.cv-blockquote {
+  margin: var(--space-3) 0;
+  padding: var(--space-2) var(--space-4);
+  border-left: 3px solid var(--border-2);
+  color: var(--text-2);
+  font-style: italic;
+  font-size: var(--text-base);
+}
+
+/* ── Document structure — code ───────────────────────────── */
+
+.cv-code {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.875em;
+  background: var(--surface-3, rgba(0,0,0,0.05));
+  border-radius: 3px;
+  padding: 0.1em 0.3em;
+}
+
+.cv-pre {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.85em;
+  background: var(--surface-3, rgba(0,0,0,0.05));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-4);
+  margin: var(--space-3) 0;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.cv-pre .cv-code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+}
+
+/* ── Document structure — tables ─────────────────────────── */
+
+.cv-table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: var(--space-3) 0;
+  font-size: var(--text-base);
+}
+
+.cv-th {
+  text-align: left;
+  font-weight: var(--font-semibold);
+  color: var(--color-text-primary);
+  background: var(--surface-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+}
+
+.cv-td {
+  color: var(--color-text-secondary);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  vertical-align: top;
+}
+
+/* ── Document structure — horizontal rule ────────────────── */
+
+.cv-hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: var(--space-5) 0;
 }

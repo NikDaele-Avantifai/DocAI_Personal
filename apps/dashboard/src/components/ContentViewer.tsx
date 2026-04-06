@@ -1,14 +1,16 @@
-import {
+import React, {
+  Fragment,
   useState,
-  useMemo,
   useRef,
+  useMemo,
   useLayoutEffect,
   useEffect,
   useCallback,
+  type ReactNode,
 } from "react"
 import "./ContentViewer.css"
 
-// ── Exported types ────────────────────────────────────────────────────────────
+// ── Exported types ─────────────────────────────────────────────────────────
 
 export type IssueLocation = {
   section: string
@@ -17,10 +19,18 @@ export type IssueLocation = {
 }
 
 export type Issue = {
-  type: string
+  // v2 fields
+  id?: string
+  type?: "text-issue" | "general-issue" | string
+  category?: string
+  explanation?: string
+  exactContent?: string | null
+  suggestedFix?: string | null
+  affectedElement?: string | null
+  // v1 backward-compat
   severity: "low" | "medium" | "high"
   title: string
-  description: string
+  description?: string
   suggestion?: string | null
   location?: IssueLocation | null
   needs_human_intervention?: boolean
@@ -30,33 +40,31 @@ export type Issue = {
   confidence?: number
 }
 
-// ── Internal types ────────────────────────────────────────────────────────────
+// ── Accessors (v1 + v2) ────────────────────────────────────────────────────
 
-type Section = {
-  index: number
-  text: string
-  lineCount: number
+function issueExplanation(issue: Issue): string {
+  return issue.explanation ?? issue.description ?? ""
 }
 
-type Highlight = {
-  quote: string
-  severity: "low" | "medium" | "high"
+function issueSuggestion(issue: Issue): string | null | undefined {
+  return issue.suggestedFix ?? issue.suggestion
 }
 
-type CleanGroup = {
-  kind: "group"
-  groupIndex: number
-  sections: Section[]
-  lineCount: number
+function issueQuote(issue: Issue): string | null | undefined {
+  return issue.exactContent ?? issue.location?.quote
 }
 
-type AffectedBlock = {
-  kind: "affected"
-  section: Section
-  issues: Issue[]
+function issueNeedsHuman(issue: Issue): boolean {
+  if (issue.needs_human_intervention || issue.requires_human) return true
+  if (issue.type === "text-issue" && issue.suggestedFix === null) return true
+  return false
 }
 
-type RenderBlock = CleanGroup | AffectedBlock
+function issueKey(issue: Issue): string {
+  return issue.id ? `id::${issue.id}` : `${issue.type}::${issue.title}`
+}
+
+// ── Internal types ─────────────────────────────────────────────────────────
 
 type ConnectorLine = {
   key: string
@@ -65,7 +73,12 @@ type ConnectorLine = {
   severity: "low" | "medium" | "high"
 }
 
-// ── Constants ─────────────────────────────────────────────────────────────────
+type MarkTarget = {
+  key: string   // issueKey
+  text: string  // exactContent
+}
+
+// ── Constants ──────────────────────────────────────────────────────────────
 
 const SEV_COLOR: Record<string, string> = {
   high:   "#C0392B",
@@ -79,172 +92,256 @@ const SEV_LABEL: Record<string, string> = {
   low:    "Low",
 }
 
-const SEV_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2 }
+const ACTION_BTNS = [
+  { type: "restructure",    label: "Restructure"    },
+  { type: "rewrite",        label: "Rewrite"        },
+  { type: "add_summary",    label: "Summarize"      },
+  { type: "remove_section", label: "Remove Section" },
+] as const
 
-const GROUP_LINE_LIMIT = 100
+// ── HTML pre-processing ────────────────────────────────────────────────────
 
-// ── Pure helpers ──────────────────────────────────────────────────────────────
-
-function stripHtml(html: string): string {
-  // Preserve paragraph/line structure before stripping tags
-  const withNewlines = html
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/p>/gi, "\n\n")
-    .replace(/<\/div>/gi, "\n")
-    .replace(/<\/li>/gi, "\n")
-    .replace(/<\/h[1-6]>/gi, "\n\n")
-    .replace(/<[^>]+>/g, "")
-
-  // Decode all HTML entities (including &mdash; &ndash; &hellip; etc.)
-  // using the browser's built-in parser — safe since all tags are stripped above
-  const div = document.createElement("div")
-  div.innerHTML = withNewlines
-  const decoded = div.textContent ?? withNewlines
-
-  return decoded
-    .replace(/\n{3,}/g, "\n\n")
-    .trim()
+/**
+ * Clean up Confluence-specific artefacts before DOMParser sees the HTML:
+ * - CDATA markers that leak out of ac:plain-text-body blocks
+ * - Zero-width characters
+ */
+function preprocessConfluenceHtml(html: string): string {
+  return html
+    .replace(/<!\[CDATA\[/g, "")
+    .replace(/\]\]>/g, "")
+    .replace(/\u200B/g, "")  // zero-width spaces
 }
 
-function parseIntoSections(raw: string): Section[] {
-  const text = stripHtml(raw)
-  const blocks = text.split(/\n\n+/).map(b => b.trim()).filter(Boolean)
-  return blocks.map((block, index) => ({
-    index,
-    text: block,
-    lineCount: block.split("\n").length,
-  }))
-}
+// ── HTML → React converter with inline mark injection ──────────────────────
 
-function getHeading(section: Section): string | null {
-  const lines = section.text.split("\n")
-  const first = lines[0].trim()
-  if (
-    first.length > 0 &&
-    first.length <= 70 &&
-    !first.match(/[.!?]$/) &&
-    (lines.length === 1 || first.length < 50)
-  ) {
-    return first
-  }
-  return null
-}
-
-function issueKey(issue: Issue): string {
-  return `${issue.type}::${issue.title}`
-}
-
-function highestSev(issues: Issue[]): "low" | "medium" | "high" {
-  return issues.reduce<"low" | "medium" | "high">(
-    (best, i) => (SEV_ORDER[i.severity] < SEV_ORDER[best] ? i.severity : best),
-    "low"
-  )
-}
-
-function normalizeWhitespace(s: string): string {
-  return s.replace(/\u00A0/g, " ").replace(/\s+/g, " ").trim()
-}
-
-function matchIssuesToSections(
-  issues: Issue[],
-  sections: Section[]
-): { sectionIssueMap: Map<number, Issue[]>; docLevelIssues: Issue[] } {
-  const map = new Map<number, Issue[]>()
-  const docLevel: Issue[] = []
-
-  for (const issue of issues) {
-    const loc = issue.location
-    if (!loc || loc.line_hint === "full_document" || loc.section === "document") {
-      docLevel.push(issue)
-      continue
-    }
-
-    let matched = false
-
-    if (loc.quote) {
-      const normQuote = normalizeWhitespace(loc.quote)
-      for (const s of sections) {
-        // Try exact match first, then normalized fallback
-        if (s.text.includes(loc.quote) || normalizeWhitespace(s.text).includes(normQuote)) {
-          map.set(s.index, [...(map.get(s.index) ?? []), issue])
-          matched = true
-          break
-        }
-      }
-    }
-
-    if (!matched && loc.section && loc.section !== "document") {
-      const needle = loc.section.toLowerCase()
-      for (const s of sections) {
-        const h = getHeading(s)
-        if (h && (h.toLowerCase().includes(needle) || needle.includes(h.toLowerCase()))) {
-          map.set(s.index, [...(map.get(s.index) ?? []), issue])
-          matched = true
-          break
-        }
-      }
-    }
-
-    if (!matched) docLevel.push(issue)
-  }
-
-  return { sectionIssueMap: map, docLevelIssues: docLevel }
-}
-
-function renderHighlights(text: string, highlights: Highlight[]): React.ReactNode {
-  if (highlights.length === 0) return <>{text}</>
-
-  type Span = { start: number; end: number; sev: string }
+/**
+ * Splits a text string around MarkTarget matches and injects <mark> elements
+ * with amber styling and a data-issue-key attribute.
+ */
+function splitAndMark(
+  text: string,
+  marks: MarkTarget[],
+  refCb: (key: string, el: HTMLElement | null) => void,
+  prefix: string,
+): ReactNode[] {
+  type Span = { start: number; end: number; k: string }
   const spans: Span[] = []
 
-  for (const h of highlights) {
-    if (!h.quote) continue
-    let idx = text.indexOf(h.quote)
+  for (const m of marks) {
+    if (!m.text) continue
+    // Exact match first, then NBSP-normalised fallback
+    let idx = text.indexOf(m.text)
     if (idx === -1) {
-      // Fallback: try replacing non-breaking spaces with regular spaces
-      const normalized = text.replace(/\u00A0/g, " ")
-      const normQuote = h.quote.replace(/\u00A0/g, " ")
-      idx = normalized.indexOf(normQuote)
+      const norm = (s: string) => s.replace(/\u00A0/g, " ")
+      idx = norm(text).indexOf(norm(m.text))
     }
-    if (idx !== -1) spans.push({ start: idx, end: idx + h.quote.length, sev: h.severity })
+    if (idx !== -1 && !spans.some(s => idx < s.end && idx + m.text.length > s.start)) {
+      spans.push({ start: idx, end: idx + m.text.length, k: m.key })
+    }
   }
 
-  if (spans.length === 0) return <>{text}</>
-
+  if (spans.length === 0) return [text]
   spans.sort((a, b) => a.start - b.start)
 
-  const nodes: React.ReactNode[] = []
+  const nodes: ReactNode[] = []
   let pos = 0
   for (const s of spans) {
-    if (s.start > pos) nodes.push(<span key={`t${pos}`}>{text.slice(pos, s.start)}</span>)
+    if (s.start > pos) nodes.push(text.slice(pos, s.start))
+    const ik = s.k
     nodes.push(
-      <mark key={`m${s.start}`} className={`cv-mark cv-mark-${s.sev}`}>
+      <mark
+        key={`${prefix}-${s.start}`}
+        data-issue-key={ik}
+        className="cv-mark-amber"
+        ref={(el: HTMLElement | null) => refCb(ik, el)}
+      >
         {text.slice(s.start, s.end)}
       </mark>
     )
     pos = s.end
   }
-  if (pos < text.length) nodes.push(<span key="tail">{text.slice(pos)}</span>)
-  return <>{nodes}</>
+  if (pos < text.length) nodes.push(text.slice(pos))
+  return nodes
 }
 
-// ── Annotation card sub-component ────────────────────────────────────────────
+/**
+ * True if an element is one of Confluence's line-number injections.
+ * These appear inside code blocks and should not be rendered.
+ */
+function isLineNumberSpan(el: Element): boolean {
+  const cls = el.getAttribute("class") ?? ""
+  return (
+    cls.includes("linenumber") ||
+    cls.includes("ds-line-number") ||
+    el.getAttribute("data-ds--line-number") !== null
+  )
+}
+
+/**
+ * Recursively converts a DOM node to React elements, with mark injection
+ * and special handling for Confluence-specific HTML patterns.
+ */
+function domToReact(
+  node: Node,
+  marks: MarkTarget[],
+  refCb: (key: string, el: HTMLElement | null) => void,
+  c: { n: number },
+): ReactNode {
+  const k = `${c.n++}`
+
+  // ── Text node ────────────────────────────────────────────────────────────
+  if (node.nodeType === Node.TEXT_NODE) {
+    const text = node.textContent ?? ""
+    if (!text) return null
+    const parts = splitAndMark(text, marks, refCb, k)
+    if (parts.length === 1 && typeof parts[0] === "string") return text
+    return <Fragment key={k}>{parts}</Fragment>
+  }
+
+  if (node.nodeType !== Node.ELEMENT_NODE) return null
+
+  const el = node as Element
+  const tag = el.tagName.toLowerCase()
+
+  // Skip non-content elements entirely
+  if (["script", "style", "head", "colgroup", "col"].includes(tag)) return null
+
+  const ch = Array.from(el.childNodes)
+    .map(n => domToReact(n, marks, refCb, c))
+    .filter((n): n is ReactNode => n != null)
+
+  switch (tag) {
+    // ── Headings ─────────────────────────────────────────────────────────
+    case "h1": return <h1 key={k} className="cv-h1">{ch}</h1>
+    case "h2": return <h2 key={k} className="cv-h2">{ch}</h2>
+    case "h3": return <h3 key={k} className="cv-h3">{ch}</h3>
+    case "h4": return <h4 key={k} className="cv-h4">{ch}</h4>
+    case "h5": return <h5 key={k} className="cv-h5">{ch}</h5>
+    case "h6": return <h6 key={k} className="cv-h6">{ch}</h6>
+
+    // ── Block text ────────────────────────────────────────────────────────
+    case "p":          return <p          key={k} className="cv-p">{ch}</p>
+    case "blockquote": return <blockquote key={k} className="cv-blockquote">{ch}</blockquote>
+
+    // ── Lists ─────────────────────────────────────────────────────────────
+    case "ul": return <ul key={k} className="cv-ul">{ch}</ul>
+    case "ol": return <ol key={k} className="cv-ol">{ch}</ol>
+    case "li": return <li key={k} className="cv-li">{ch}</li>
+
+    // ── Inline formatting ─────────────────────────────────────────────────
+    case "strong": case "b":             return <strong key={k}>{ch}</strong>
+    case "em":     case "i":             return <em     key={k}>{ch}</em>
+    case "u":                            return <u      key={k}>{ch}</u>
+    case "s": case "strike": case "del": return <s      key={k}>{ch}</s>
+    case "sup": return <sup key={k}>{ch}</sup>
+    case "sub": return <sub key={k}>{ch}</sub>
+
+    // ── Code ─────────────────────────────────────────────────────────────
+    case "pre": {
+      // If pre wraps a code element let the code case handle it
+      return <pre key={k} className="cv-pre">{ch}</pre>
+    }
+    case "code": {
+      // Confluence code blocks: <code style="white-space:pre"> containing
+      // <span data-ds--code--row=""> line wrappers with line-number spans.
+      const hasCodeRows = Array.from(el.children).some(
+        c => c.hasAttribute("data-ds--code--row")
+      )
+      if (hasCodeRows) {
+        // Strip line-number spans; each row span becomes a line of text
+        const lines: ReactNode[] = []
+        Array.from(el.children).forEach((row, i) => {
+          if (!row.hasAttribute("data-ds--code--row")) return
+          const lineNodes = Array.from(row.childNodes)
+            .filter(n => {
+              if (n.nodeType === Node.ELEMENT_NODE) {
+                return !isLineNumberSpan(n as Element)
+              }
+              return true
+            })
+            .map(n => domToReact(n, marks, refCb, c))
+            .filter((n): n is ReactNode => n != null)
+          lines.push(
+            <Fragment key={`row-${i}`}>{lineNodes}{"\n"}</Fragment>
+          )
+        })
+        return (
+          <pre key={k} className="cv-pre">
+            <code className="cv-code">{lines}</code>
+          </pre>
+        )
+      }
+      return <code key={k} className="cv-code">{ch}</code>
+    }
+
+    // ── Tables ────────────────────────────────────────────────────────────
+    case "table": return <table key={k} className="cv-table">{ch}</table>
+    case "thead": return <thead key={k}>{ch}</thead>
+    case "tbody": return <tbody key={k}>{ch}</tbody>
+    case "tfoot": return <tfoot key={k}>{ch}</tfoot>
+    case "tr":    return <tr    key={k}>{ch}</tr>
+    case "th":    return <th    key={k} className="cv-th">{ch}</th>
+    case "td":    return <td    key={k} className="cv-td">{ch}</td>
+
+    // ── Misc ──────────────────────────────────────────────────────────────
+    case "br":  return <br key={k} />
+    case "hr":  return <hr key={k} className="cv-hr" />
+    case "img": return null
+    case "a":   return <span key={k}>{ch}</span>  // strip href, keep text
+
+    // ── Span ─────────────────────────────────────────────────────────────
+    case "span": {
+      // Skip Confluence line-number injections
+      if (isLineNumberSpan(el)) return null
+      // Code-row spans: just render children (the parent code case handles structure)
+      if (el.hasAttribute("data-ds--code--row")) {
+        return ch.length > 0 ? <Fragment key={k}>{ch}</Fragment> : null
+      }
+      return ch.length > 0 ? <span key={k}>{ch}</span> : null
+    }
+
+    case "div":  return <div key={k}>{ch}</div>
+
+    // ── Confluence AC tags + unknown → render children, no wrapper ────────
+    default: return ch.length > 0 ? <Fragment key={k}>{ch}</Fragment> : null
+  }
+}
+
+function parseHtmlToReact(
+  html: string,
+  marks: MarkTarget[],
+  refCb: (key: string, el: HTMLElement | null) => void,
+): ReactNode {
+  const clean = preprocessConfluenceHtml(html)
+  const doc = new DOMParser().parseFromString(clean, "text/html")
+  const c = { n: 0 }
+  const children = Array.from(doc.body.childNodes)
+    .map(n => domToReact(n, marks, refCb, c))
+    .filter((n): n is ReactNode => n != null)
+  return <>{children}</>
+}
+
+// ── Annotation card ────────────────────────────────────────────────────────
 
 interface AnnotationCardProps {
   issue: Issue
   created: boolean
+  proposing: boolean
   active: boolean
   cardRef: (el: HTMLDivElement | null) => void
   onClick: () => void
   onPropose: (e: React.MouseEvent) => void
 }
 
-function AnnotationCard({ issue, created, active, cardRef, onClick, onPropose }: AnnotationCardProps) {
-  const needsHuman = !!(issue.requires_human || issue.needs_human_intervention)
-  const color = needsHuman ? "var(--border)" : (SEV_COLOR[issue.severity] ?? SEV_COLOR.low)
-  const label = SEV_LABEL[issue.severity] ?? "Low"
-  const quote = issue.location?.quote
-  const shortQuote = quote ? (quote.length > 60 ? quote.slice(0, 57) + "…" : quote) : null
+function AnnotationCard({ issue, created, proposing, active, cardRef, onClick, onPropose }: AnnotationCardProps) {
+  const needsHuman  = issueNeedsHuman(issue)
+  const color       = needsHuman ? "var(--border)" : (SEV_COLOR[issue.severity] ?? SEV_COLOR.low)
+  const label       = SEV_LABEL[issue.severity] ?? "Low"
+  const quote       = issueQuote(issue)
+  const shortQuote  = quote ? (quote.length > 60 ? quote.slice(0, 57) + "…" : quote) : null
+  const suggestion  = issueSuggestion(issue)
+  const explanation = issueExplanation(issue)
 
   return (
     <div
@@ -264,12 +361,10 @@ function AnnotationCard({ issue, created, active, cardRef, onClick, onPropose }:
         {needsHuman ? (
           <div className="cv-human-block">
             <div className="cv-human-label">Human review required</div>
-            <div className="cv-human-action">
-              {issue.human_action_needed ?? issue.description}
-            </div>
+            <div className="cv-human-action">{issue.human_action_needed ?? explanation}</div>
           </div>
         ) : (
-          <div className="cv-card-suggestion">{issue.suggestion}</div>
+          <div className="cv-card-suggestion">{suggestion}</div>
         )}
       </div>
       <div className="cv-card-footer">
@@ -278,9 +373,13 @@ function AnnotationCard({ issue, created, active, cardRef, onClick, onPropose }:
         ) : (
           <button
             className={`cv-propose-btn${created ? " cv-propose-done" : ""}`}
-            disabled={created}
+            disabled={created || proposing}
             onClick={onPropose}>
-            {created ? "✓ Proposed" : "Propose Fix"}
+            {proposing
+              ? <span className="cv-btn-spinner" />
+              : created
+              ? "✓ Proposed"
+              : "Propose Fix"}
           </button>
         )}
       </div>
@@ -288,31 +387,25 @@ function AnnotationCard({ issue, created, active, cardRef, onClick, onPropose }:
   )
 }
 
-// ── Connector SVG sub-component ───────────────────────────────────────────────
+// ── Connector SVG ──────────────────────────────────────────────────────────
 
 function ConnectorSvg({ lines, height }: { lines: ConnectorLine[]; height: number }) {
   if (lines.length === 0 || height === 0) return null
   return (
-    <svg
-      className="cv-connectors"
-      style={{ height }}
-      aria-hidden="true">
+    <svg className="cv-connectors" style={{ height }} aria-hidden="true">
       {lines.map(c => {
-        const color = SEV_COLOR[c.severity] ?? SEV_COLOR.low
         const mx = c.x1 + (c.x2 - c.x1) * 0.5
         return (
           <g key={c.key}>
             <path
               d={`M ${c.x1} ${c.y1} C ${mx} ${c.y1} ${mx} ${c.y2} ${c.x2} ${c.y2}`}
-              stroke={color}
+              stroke="rgb(251,191,36)"
               strokeWidth={1}
-              strokeOpacity={0.3}
+              strokeOpacity={0.55}
               fill="none"
             />
-            {/* Source dot — on the right edge of the paragraph */}
-            <circle cx={c.x1} cy={c.y1} r={2.5} fill={color} fillOpacity={0.4} />
-            {/* Target dot — on the left edge of the card */}
-            <circle cx={c.x2} cy={c.y2} r={2.5} fill={color} fillOpacity={0.55} />
+            <circle cx={c.x1} cy={c.y1} r={2.5} fill="rgb(251,191,36)" fillOpacity={0.6} />
+            <circle cx={c.x2} cy={c.y2} r={2.5} fill="rgb(251,191,36)" fillOpacity={0.7} />
           </g>
         )
       })}
@@ -320,14 +413,15 @@ function ConnectorSvg({ lines, height }: { lines: ConnectorLine[]; height: numbe
   )
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
+// ── Main component ─────────────────────────────────────────────────────────
 
 export interface ContentViewerProps {
   content: string
   issues: Issue[]
   pageTitle: string
-  onCreateProposal: (issue: Issue) => void
-  onProposeAll: (issues: Issue[]) => void
+  onCreateProposal: (issue: Issue) => Promise<void>
+  onProposeAll: (issues: Issue[]) => Promise<void>
+  onAction?: (type: string) => void
 }
 
 export default function ContentViewer({
@@ -335,97 +429,86 @@ export default function ContentViewer({
   issues,
   onCreateProposal,
   onProposeAll,
+  onAction,
 }: ContentViewerProps) {
-  // ── Data ─────────────────────────────────────────────────────────────────
-  const sections = useMemo(() => parseIntoSections(content), [content])
+  // ── Refs ──────────────────────────────────────────────────────────────
+  const columnsRef  = useRef<HTMLDivElement>(null)
+  const leftColRef  = useRef<HTMLDivElement>(null)
+  const rightColRef = useRef<HTMLDivElement>(null)
+  const markRefs    = useRef<Map<string, HTMLElement>>(new Map())
+  const cardRefs    = useRef<Map<string, HTMLDivElement>>(new Map())
+  const toastTimer  = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const { sectionIssueMap, docLevelIssues } = useMemo(
-    () => matchIssuesToSections(issues, sections),
-    [issues, sections]
+  // Stable ref callback — markRefs.current is always the same Map
+  const markRefCb = useCallback((key: string, el: HTMLElement | null) => {
+    if (el) markRefs.current.set(key, el)
+    else    markRefs.current.delete(key)
+  }, [])
+
+  // ── Parsed content ────────────────────────────────────────────────────
+  // Mark any issue that has a quote/exactContent, EXCEPT general-issue
+  const marks = useMemo<MarkTarget[]>(() => {
+    return issues
+      .filter(i => i.type !== "general-issue" && !!issueQuote(i))
+      .map(i => ({ key: issueKey(i), text: issueQuote(i)! }))
+  }, [issues])
+
+  const renderedContent = useMemo(
+    () => parseHtmlToReact(content, marks, markRefCb),
+    [content, marks, markRefCb]
   )
 
-  // Group consecutive clean sections into ~100-line blocks.
-  const renderBlocks = useMemo((): RenderBlock[] => {
-    const blocks: RenderBlock[] = []
-    let groupIndex = 0
-    let pending: Section[] = []
-    let pendingLines = 0
-
-    function flushGroup() {
-      if (pending.length === 0) return
-      blocks.push({ kind: "group", groupIndex, sections: pending, lineCount: pendingLines })
-      groupIndex++
-      pending = []
-      pendingLines = 0
-    }
-
-    for (const section of sections) {
-      const sectionIssues = sectionIssueMap.get(section.index) ?? []
-      if (sectionIssues.length > 0) {
-        flushGroup()
-        blocks.push({ kind: "affected", section, issues: sectionIssues })
-      } else {
-        pending.push(section)
-        pendingLines += section.lineCount
-        if (pendingLines >= GROUP_LINE_LIMIT) flushGroup()
-      }
-    }
-    flushGroup()
-    return blocks
-  }, [sections, sectionIssueMap])
-
+  // ── State ─────────────────────────────────────────────────────────────
   const [createdProposals, setCreatedProposals] = useState<Set<string>>(new Set())
-  const [activeKey, setActiveKey] = useState<string | null>(null)
-
-  // SVG connector state — updated imperatively inside calculatePositions
-  const [svgData, setSvgData] = useState<{ lines: ConnectorLine[]; height: number }>({
+  const [activeKey,        setActiveKey]        = useState<string | null>(null)
+  const [proposingKey,     setProposingKey]     = useState<string | null>(null)
+  const [proposingAll,     setProposingAll]     = useState(false)
+  const [toast,            setToast]            = useState<string | null>(null)
+  const [svgData,          setSvgData]          = useState<{ lines: ConnectorLine[]; height: number }>({
     lines: [],
     height: 0,
   })
 
-  // ── Refs ─────────────────────────────────────────────────────────────────
-  const columnsRef    = useRef<HTMLDivElement>(null)
-  const leftColRef    = useRef<HTMLDivElement>(null)
-  const rightColRef   = useRef<HTMLDivElement>(null)
-  const highlightRefs = useRef<Map<string, HTMLDivElement>>(new Map())
-  const cardRefs      = useRef<Map<string, HTMLDivElement>>(new Map())
+  // ── Toast helper ──────────────────────────────────────────────────────
+  function showToast(msg: string) {
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+    setToast(msg)
+    toastTimer.current = setTimeout(() => setToast(null), 4000)
+  }
 
-  // ── Ordered annotation list ───────────────────────────────────────────────
-  const orderedAnnotations = useMemo(() => {
-    const result: Array<{ key: string; issue: Issue; sectionIndex: number }> = []
-    for (const issue of docLevelIssues) {
-      result.push({ key: issueKey(issue), issue, sectionIndex: -1 })
-    }
-    for (const [sIdx, list] of [...sectionIssueMap.entries()].sort(([a], [b]) => a - b)) {
-      for (const issue of list) {
-        result.push({ key: issueKey(issue), issue, sectionIndex: sIdx })
-      }
-    }
-    return result
-  }, [docLevelIssues, sectionIssueMap])
+  useEffect(() => {
+    return () => { if (toastTimer.current) clearTimeout(toastTimer.current) }
+  }, [])
 
-  // ── Layout: position cards + compute connector lines ─────────────────────
+  // ── Annotations list ──────────────────────────────────────────────────
+  const annotations = useMemo(
+    () => issues.map(issue => ({ key: issueKey(issue), issue })),
+    [issues]
+  )
+
+  // ── Layout: position cards + draw connectors ─────────────────────────
   const calculatePositions = useCallback(() => {
     if (!columnsRef.current || !rightColRef.current || !leftColRef.current) return
 
     const containerRect = columnsRef.current.getBoundingClientRect()
 
-    // 1. Compute desired card tops
+    // 1. Compute desired top for each card
     type Entry = { key: string; desiredTop: number }
     const entries: Entry[] = []
 
-    for (const ann of orderedAnnotations) {
-      if (ann.sectionIndex === -1) {
-        entries.push({ key: ann.key, desiredTop: 12 })
+    for (const ann of annotations) {
+      const markEl = markRefs.current.get(ann.key) ?? null
+      if (markEl) {
+        const markRect = markEl.getBoundingClientRect()
+        entries.push({ key: ann.key, desiredTop: markRect.top - containerRect.top })
       } else {
-        const el = highlightRefs.current.get(ann.key)
-        if (!el) continue
-        const rect = el.getBoundingClientRect()
-        entries.push({ key: ann.key, desiredTop: rect.top - containerRect.top })
+        entries.push({ key: ann.key, desiredTop: 12 })
       }
     }
 
-    // 2. Resolve overlaps + set card positions
+    // 2. Sort by document position, then resolve overlaps
+    entries.sort((a, b) => a.desiredTop - b.desiredTop)
+
     let lastBottom = 0
     for (const { key, desiredTop } of entries) {
       const actual = Math.max(desiredTop, lastBottom + 8)
@@ -440,35 +523,32 @@ export default function ContentViewer({
     const contentHeight = Math.max(leftColRef.current.scrollHeight, lastBottom + 20)
     rightColRef.current.style.minHeight = `${contentHeight}px`
 
-    // 4. Compute SVG connector lines (after card positions are applied)
+    // 4. Draw connectors — only for issues that have a visible mark
     const newLines: ConnectorLine[] = []
-    for (const ann of orderedAnnotations) {
-      if (ann.sectionIndex === -1) continue
-      const paraEl = highlightRefs.current.get(ann.key)
+    for (const ann of annotations) {
+      const markEl = markRefs.current.get(ann.key)
       const cardEl = cardRefs.current.get(ann.key)
-      if (!paraEl || !cardEl) continue
+      if (!markEl || !cardEl) continue  // no mark → no connector (covers general-issue)
 
-      const paraRect = paraEl.getBoundingClientRect()
+      const markRect = markEl.getBoundingClientRect()
+      // Hide arrow when mark is scrolled out of the visible viewport
+      if (markRect.bottom < 0 || markRect.top > window.innerHeight) continue
+
       const cardRect = cardEl.getBoundingClientRect()
-
       newLines.push({
         key: ann.key,
-        // Start: right edge of paragraph at its vertical midpoint
-        x1: paraRect.right - containerRect.left,
-        y1: paraRect.top - containerRect.top + paraRect.height / 2,
-        // End: left edge of card at its vertical midpoint
-        x2: cardRect.left - containerRect.left,
-        y2: cardRect.top - containerRect.top + cardRect.height / 2,
+        x1: markRect.right  - containerRect.left,
+        y1: markRect.top    - containerRect.top + markRect.height / 2,
+        x2: cardRect.left   - containerRect.left,
+        y2: cardRect.top    - containerRect.top + cardRect.height  / 2,
         severity: ann.issue.severity,
       })
     }
 
     setSvgData({ lines: newLines, height: contentHeight })
-  }, [orderedAnnotations])
+  }, [annotations])
 
-  useLayoutEffect(() => {
-    calculatePositions()
-  }, [calculatePositions])
+  useLayoutEffect(() => { calculatePositions() }, [calculatePositions])
 
   useEffect(() => {
     const ro = new ResizeObserver(calculatePositions)
@@ -476,25 +556,49 @@ export default function ContentViewer({
     return () => ro.disconnect()
   }, [calculatePositions])
 
-  function handlePropose(issue: Issue) {
-    setCreatedProposals(prev => new Set([...prev, issueKey(issue)]))
-    onCreateProposal(issue)
+  useEffect(() => {
+    window.addEventListener("scroll", calculatePositions, { passive: true })
+    return () => window.removeEventListener("scroll", calculatePositions)
+  }, [calculatePositions])
+
+  // ── Handlers ──────────────────────────────────────────────────────────
+  async function handlePropose(issue: Issue) {
+    const k = issueKey(issue)
+    if (proposingKey === k || createdProposals.has(k)) return
+    setProposingKey(k)
+    try {
+      await onCreateProposal(issue)
+      setCreatedProposals(prev => new Set([...prev, k]))
+      showToast("Proposal created — view it in the Proposals tab")
+    } catch {
+      // leave button in un-proposed state so user can retry
+    } finally {
+      setProposingKey(null)
+    }
   }
 
-  function handleProposeAll() {
+  async function handleProposeAll() {
     const toPropose = issues.filter(i => !createdProposals.has(issueKey(i)))
-    if (toPropose.length === 0) return
-    setCreatedProposals(new Set(issues.map(issueKey)))
-    onProposeAll(toPropose)
+    if (toPropose.length === 0 || proposingAll) return
+    setProposingAll(true)
+    try {
+      await onProposeAll(toPropose)
+      setCreatedProposals(new Set(issues.map(issueKey)))
+      showToast("All proposals created — view them in the Proposals tab")
+    } catch {
+      // leave state unchanged so user can retry
+    } finally {
+      setProposingAll(false)
+    }
   }
 
-  // ── Summary counts ────────────────────────────────────────────────────────
-  const highCount = issues.filter(i => i.severity === "high").length
-  const medCount  = issues.filter(i => i.severity === "medium").length
-  const lowCount  = issues.filter(i => i.severity === "low").length
+  // ── Summary counts ────────────────────────────────────────────────────
+  const highCount   = issues.filter(i => i.severity === "high").length
+  const medCount    = issues.filter(i => i.severity === "medium").length
+  const lowCount    = issues.filter(i => i.severity === "low").length
   const allProposed = issues.length > 0 && issues.every(i => createdProposals.has(issueKey(i)))
 
-  // ── Empty state ───────────────────────────────────────────────────────────
+  // ── Empty state ───────────────────────────────────────────────────────
   if (!content || content.trim() === "") {
     return (
       <div className="cv-empty">
@@ -505,28 +609,35 @@ export default function ContentViewer({
     )
   }
 
-  // ── No issues ─────────────────────────────────────────────────────────────
+  // ── No issues ─────────────────────────────────────────────────────────
   if (issues.length === 0) {
     return (
       <div className="cv-wrapper">
         <div className="cv-no-issues-bar">
           <span className="cv-no-issues-dot" />
-          No issues detected — page content looks good
+          <span>No issues detected — page content looks good</span>
+          {onAction && (
+            <div className="cv-no-issues-actions">
+              {ACTION_BTNS.map(btn => (
+                <button key={btn.type} className="cv-ctrl-btn" onClick={() => onAction(btn.type)}>
+                  {btn.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <div className="cv-left cv-left-full">
-          {sections.map(section => (
-            <div key={section.index} className="cv-para">{section.text}</div>
-          ))}
+          {renderedContent}
         </div>
       </div>
     )
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ── Full render ───────────────────────────────────────────────────────
   return (
     <div className="cv-wrapper">
 
-      {/* ── Header bar ── */}
+      {/* Header bar */}
       <div className="cv-header">
         <div className="cv-header-counts">
           {highCount > 0 && (
@@ -549,71 +660,50 @@ export default function ContentViewer({
           </span>
         </div>
         <div className="cv-header-actions">
-          {issues.length > 0 && (
-            <button
-              className={`cv-propose-all-btn${allProposed ? " cv-propose-all-done" : ""}`}
-              disabled={allProposed}
-              onClick={handleProposeAll}>
-              {allProposed ? "✓ All proposed" : "Propose all fixes"}
-            </button>
+          {onAction && (
+            <>
+              <span className="cv-header-divider" />
+              {ACTION_BTNS.map(btn => (
+                <button key={btn.type} className="cv-ctrl-btn" onClick={() => onAction(btn.type)}>
+                  {btn.label}
+                </button>
+              ))}
+              <span className="cv-header-divider" />
+            </>
           )}
+          <button
+            className={`cv-propose-all-btn${allProposed ? " cv-propose-all-done" : ""}`}
+            disabled={allProposed || proposingAll}
+            onClick={handleProposeAll}>
+            {proposingAll
+              ? <><span className="cv-btn-spinner cv-btn-spinner-light" /> Proposing…</>
+              : allProposed
+              ? "✓ All proposed"
+              : "Propose all fixes"}
+          </button>
         </div>
       </div>
 
-      {/* ── Two-column area ── */}
+      {/* Two-column area */}
       <div className="cv-columns" ref={columnsRef}>
 
-        {/* SVG connector overlay — absolutely positioned behind cards */}
         <ConnectorSvg lines={svgData.lines} height={svgData.height} />
 
-        {/* Left column — document */}
+        {/* Left: document with inline amber marks */}
         <div className="cv-left" ref={leftColRef}>
-          {renderBlocks.map(block => {
-            if (block.kind === "group") {
-              return (
-                <div key={`group-${block.groupIndex}`}>
-                  {block.sections.map(section => (
-                    <div key={section.index} className="cv-para">{section.text}</div>
-                  ))}
-                </div>
-              )
-            }
-
-            // Affected section — always rendered
-            const { section, issues: sectionIssues } = block
-            const maxSev = highestSev(sectionIssues)
-            const highlights: Highlight[] = sectionIssues
-              .filter(i => i.location?.quote)
-              .map(i => ({ quote: i.location!.quote!, severity: i.severity }))
-
-            return (
-              <div
-                key={section.index}
-                className={`cv-para cv-para-affected cv-para-${maxSev}`}
-                ref={el => {
-                  for (const issue of sectionIssues) {
-                    const k = issueKey(issue)
-                    if (el) highlightRefs.current.set(k, el as HTMLDivElement)
-                    else    highlightRefs.current.delete(k)
-                  }
-                }}>
-                {renderHighlights(section.text, highlights)}
-              </div>
-            )
-          })}
+          {renderedContent}
         </div>
 
-        {/* Right column — annotation cards */}
-        <div className="cv-right" ref={rightColRef}>
-
-          {/* Doc-level cards — anchored at top */}
-          {docLevelIssues.map(issue => {
-            const k = issueKey(issue)
-            return (
+        {/* Right: annotation cards (absolutely positioned) */}
+        <div className="cv-right-panel">
+          <div className="cv-right-header">Issues</div>
+          <div className="cv-right" ref={rightColRef}>
+            {annotations.map(({ key: k, issue }) => (
               <AnnotationCard
                 key={k}
                 issue={issue}
                 created={createdProposals.has(k)}
+                proposing={proposingKey === k}
                 active={activeKey === k}
                 cardRef={el => {
                   if (el) cardRefs.current.set(k, el)
@@ -622,33 +712,19 @@ export default function ContentViewer({
                 onClick={() => setActiveKey(k === activeKey ? null : k)}
                 onPropose={e => { e.stopPropagation(); handlePropose(issue) }}
               />
-            )
-          })}
-
-          {/* Section-level cards — always rendered (affected sections always show) */}
-          {[...sectionIssueMap.entries()]
-            .sort(([a], [b]) => a - b)
-            .flatMap(([, list]) =>
-              list.map(issue => {
-                const k = issueKey(issue)
-                return (
-                  <AnnotationCard
-                    key={k}
-                    issue={issue}
-                    created={createdProposals.has(k)}
-                    active={activeKey === k}
-                    cardRef={el => {
-                      if (el) cardRefs.current.set(k, el)
-                      else    cardRefs.current.delete(k)
-                    }}
-                    onClick={() => setActiveKey(k === activeKey ? null : k)}
-                    onPropose={e => { e.stopPropagation(); handlePropose(issue) }}
-                  />
-                )
-              })
-            )}
+            ))}
+          </div>
         </div>
+
       </div>
+
+      {/* Toast notification */}
+      {toast && (
+        <div className="cv-toast">
+          <span className="cv-toast-check">✓</span>
+          {toast}
+        </div>
+      )}
     </div>
   )
 }

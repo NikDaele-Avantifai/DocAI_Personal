@@ -5,6 +5,7 @@ import anthropic
 import json
 import re
 import html as html_module
+import uuid as _uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -131,15 +132,24 @@ def _is_auto_fixable(title: str, description: str, suggestion: str) -> bool:
 
 
 class Issue(BaseModel):
-    type: str
+    # ── v2 fields (new schema) ────────────────────────────────────────────────
+    id: str = ""
+    type: str = "general-issue"           # "text-issue" | "general-issue"
+    category: str = ""                    # internal taxonomy: stale, unowned, etc.
     severity: Literal["low", "medium", "high"]
     title: str
-    description: str
-    suggestion: Optional[str] = None
-    location: Optional[IssueLocation] = None
+    explanation: str = ""                 # why this is an issue (v2 name)
+    exactContent: Optional[str] = None   # verbatim text from the page
+    suggestedFix: Optional[str] = None   # exact replacement text only
+    affectedElement: Optional[str] = None  # paragraph|heading|list-item|blockquote|table-cell
+    # ── v1 backward-compat fields (populated by _validate_and_clean) ─────────
+    description: str = ""                 # = explanation
+    suggestion: Optional[str] = None      # = suggestedFix
+    location: Optional[IssueLocation] = None  # built from exactContent
+    # ── Internal flags ────────────────────────────────────────────────────────
     fixable: bool = True
     requires_human: bool = False
-    needs_human_intervention: bool = False  # set post-parse; not expected from Claude
+    needs_human_intervention: bool = False
     human_action_needed: Optional[str] = None
     confidence: float = 1.0
 
@@ -168,12 +178,12 @@ def _build_system_prompt(analysis_settings: AnalysisSettings) -> str:
     max_issues = analysis_settings.max_issues_per_page
     confidence_threshold = analysis_settings.confidence_threshold
 
-    # Build issue type descriptions from taxonomy (only enabled types)
+    # Build issue category descriptions from taxonomy (only enabled types)
     issue_lines = []
     for issue_type, meta in ISSUE_TAXONOMY.items():
         if issue_type not in enabled:
             continue
-        human_note = f" (requires human intervention: {meta['human_reason']})" if meta.get("requires_human") else ""
+        human_note = f" (requires human: {meta['human_reason']})" if meta.get("requires_human") else ""
         issue_lines.append(f'- "{issue_type}": {meta["description"]}{human_note}')
     issue_types_block = "\n".join(issue_lines) if issue_lines else "- No issue types currently enabled."
 
@@ -196,71 +206,88 @@ Your job is to analyze a Confluence page and identify documentation quality issu
 
 You must respond with ONLY a valid JSON object — no preamble, no markdown, no explanation.
 
-Issue types you can detect:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ISSUE CATEGORIES YOU CAN DETECT:
 {issue_types_block}
 
 Focus mode: {focus_instruction}
-
-Severity levels:
-- "high": Immediate attention needed, could cause real problems
-- "medium": Should be addressed soon
-- "low": Nice to have improvement
-
 Severity filter: {severity_filter}
+Confidence threshold: Only report issues where your confidence is at least {confidence_threshold:.0%}.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Confidence: Only report issues where your confidence is at least {confidence_threshold:.0%}. If you are not sufficiently confident an issue exists, omit it.
-
-FIX AWARENESS:
-When previous issues are provided, you MUST compare the current content against each prior issue:
-- If the current content clearly addresses the issue → mark it as RESOLVED (put in resolved_issues, NOT in issues)
-- If the issue still clearly exists in the current content → keep it in issues
-- Only re-report an issue if strong evidence remains in the current content
-- A page SHOULD be marked is_healthy: true when all prior issues are resolved and no new ones exist
-- Healthy pages are the GOAL — reward progress explicitly
-
-HEALTHY PAGE CRITERIA (return is_healthy: true when all met):
-- Has a clear owner or responsible team identified
-- Has been reviewed or updated within a reasonable timeframe
-- Has clear structure with headings and logical sections
-- No duplicate or orphaned content detected
-
-For each issue include a "location" object pinpointing WHERE in the document the problem is.
-
-Response format (JSON only):
+ISSUE OBJECT FORMAT — every issue must follow this exact shape:
 {{
-  "issues": [
-    {{
-      "type": "stale",
-      "severity": "high",
-      "title": "Short title of the issue",
-      "description": "1-2 sentences explaining what the problem is",
-      "suggestion": "Concrete actionable suggestion to fix it",
-      "confidence": 0.9,
-      "location": {{
-        "section": "exact section heading this issue relates to, or 'document' if it applies to the whole page",
-        "quote": "exact verbatim substring copied from the page content (max 100 chars) that best illustrates the issue, or null if structural",
-        "line_hint": "beginning|middle|end|full_document"
-      }}
-    }}
-  ],
-  "summary": "One sentence summary of the overall documentation health",
+  "id": "<8-char unique string, e.g. first 8 chars of a uuid4>",
+  "type": "text-issue",
+  "category": "<one of the categories above: stale|unowned|unstructured|outdated_reference|missing_review_date|compliance_gap|broken_link>",
+  "severity": "high",
+  "title": "Short title of the issue (max 10 words)",
+  "explanation": "Why this is a problem, in 1-2 sentences. Be specific about what is wrong.",
+  "exactContent": "The exact verbatim substring from the page that has the issue — copied character-for-character, no changes",
+  "suggestedFix": "The exact replacement text ONLY — nothing else in the document changes",
+  "affectedElement": "paragraph",
+  "confidence": 0.9
+}}
+
+RULES — follow every one:
+
+1. TYPE FIELD:
+   - Use "text-issue" when the issue is tied to a specific piece of text in the page.
+   - Use "general-issue" when the issue is about the document as a whole (missing owner, no review date, wrong structure, etc.).
+
+2. exactContent RULES (CRITICAL):
+   - Must be copied VERBATIM from the page content provided — not paraphrased, not summarized, not trimmed.
+   - Copy it character-for-character, including punctuation and spacing.
+   - Keep it to the minimum diagnostic phrase — the shortest substring that uniquely identifies the problem.
+   - If type is "general-issue", set exactContent to null.
+   - If the issue is about missing content (something that SHOULD be there but isn't), set exactContent to null and use type "general-issue".
+
+3. suggestedFix RULES (CRITICAL):
+   - Must contain ONLY the replacement for exactContent — nothing else.
+   - If the issue is "Last Updated: August 2023" being outdated, suggestedFix is "Last Updated: April 2026" — not the full sentence, not the paragraph.
+   - If the issue is a placeholder word like "test", suggestedFix is the corrected word — nothing else.
+   - Set suggestedFix to null when: (a) type is "general-issue", OR (b) the correct fix requires information DocAI does not have (correct email address, correct person name, correct internal URL, etc.).
+
+4. affectedElement: classify which HTML element type contains the issue:
+   - "paragraph": inside a <p> block
+   - "heading": inside an <h1>–<h6> element
+   - "list-item": inside a <li> element
+   - "blockquote": inside a <blockquote>
+   - "table-cell": inside a <td> or <th>
+   - null: if type is "general-issue"
+
+5. SURGICAL PRECISION:
+   - Never propose adding new sections, restructuring content, or changing anything outside exactContent.
+   - One issue = one specific problem = one minimum fix.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FIX AWARENESS:
+When previous issues are provided, compare current content against each prior issue:
+- Issue clearly gone → add to resolved_issues (not issues)
+- Issue still exists → keep in issues
+- ALL resolved + no new issues → set is_healthy: true
+
+HEALTHY PAGE CRITERIA (is_healthy: true when all met):
+- Clear owner or responsible team identified
+- Reviewed or updated within a reasonable timeframe
+- Clear structure with headings and logical sections
+- No duplicate or orphaned content
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+FULL RESPONSE FORMAT (JSON only, no markdown):
+{{
+  "issues": [ /* 0–{max_issues} issue objects using the format above */ ],
+  "summary": "One sentence summary of overall documentation health.",
   "is_healthy": false,
   "resolved_issues": [
     {{
       "title": "Name of the issue that was fixed",
-      "resolution": "One sentence describing how it was resolved in the current content"
+      "resolution": "One sentence: how it was resolved in the current content."
     }}
   ]
 }}
 
-Rules for location.quote:
-- It MUST be an exact verbatim substring copied from the provided page content
-- Keep it under 100 characters — copy the most diagnostic phrase
-- If the issue is about missing content, set quote to null
-- If the issue applies to the whole document, set section to "document", quote to null, line_hint to "full_document"
-
-Return between 0 and {max_issues} issues maximum. Be specific and accurate.
-If the page is healthy, return empty issues array, is_healthy: true, and a positive summary."""
+Return between 0 and {max_issues} issues. If the page is healthy, return empty issues, is_healthy: true, positive summary."""
 
 
 # ── HTML → plain text (mirrors stripHtml in ContentViewer.tsx) ────────────────
@@ -352,25 +379,27 @@ Instructions:
 
 def _validate_and_clean(raw: dict, analysis_settings: AnalysisSettings) -> dict:
     """
-    Post-process the parsed JSON from Claude:
-    - Remove issues whose type is not in the enabled set
-    - Remove issues below the min_severity threshold
-    - Remove issues below the confidence threshold
-    - Enrich issues with taxonomy metadata (fixable, requires_human, human_action_needed)
-    - Cap issues at max_issues_per_page
+    Post-process the parsed JSON from Claude (v2 issue schema).
+    - Filter by enabled category, severity, and confidence
+    - Enrich with taxonomy metadata
+    - Set needs_human_intervention from taxonomy OR null suggestedFix on text-issue
+    - Populate v1 backward-compat fields (description, suggestion, location)
+    - Cap at max_issues_per_page
     """
     severity_rank = {"low": 0, "medium": 1, "high": 2}
     min_rank = severity_rank.get(analysis_settings.min_severity, 0)
     enabled = set(analysis_settings.enabled_issue_types)
+    _TAXONOMY_CATEGORIES = set(ISSUE_TAXONOMY.keys())
 
     cleaned_issues = []
     for issue in raw.get("issues", []):
-        issue_type = issue.get("type", "")
+        # category = internal taxonomy label (stale, unowned, etc.)
+        category = issue.get("category", "")
         severity = issue.get("severity", "low")
         confidence = float(issue.get("confidence", 1.0))
 
-        # Filter by enabled types
-        if issue_type not in enabled:
+        # Filter by enabled taxonomy categories (skip if not a known category)
+        if category in _TAXONOMY_CATEGORIES and category not in enabled:
             continue
 
         # Filter by severity
@@ -381,20 +410,43 @@ def _validate_and_clean(raw: dict, analysis_settings: AnalysisSettings) -> dict:
         if confidence < analysis_settings.confidence_threshold:
             continue
 
+        # Ensure ID
+        if not issue.get("id"):
+            issue["id"] = str(_uuid.uuid4())[:8]
+
         # Enrich from taxonomy
-        taxonomy_entry = ISSUE_TAXONOMY.get(issue_type, {})
+        taxonomy_entry = ISSUE_TAXONOMY.get(category, {})
         issue["fixable"] = taxonomy_entry.get("fixable", True)
         issue["requires_human"] = taxonomy_entry.get("requires_human", False)
-        if issue["requires_human"]:
-            issue["needs_human_intervention"] = True
-            issue["human_action_needed"] = taxonomy_entry.get("human_reason")
-        else:
-            issue["needs_human_intervention"] = False
-            issue["human_action_needed"] = None
+
+        # Human intervention: taxonomy flag OR text-issue with no suggestedFix
+        is_text_issue = issue.get("type", "general-issue") == "text-issue"
+        has_fix = issue.get("suggestedFix") is not None
+        needs_human = taxonomy_entry.get("requires_human", False) or (is_text_issue and not has_fix)
+        issue["needs_human_intervention"] = needs_human
+        issue["human_action_needed"] = (
+            taxonomy_entry.get("human_reason") or "Manual review required"
+        ) if needs_human else None
+
+        # ── Populate v1 backward-compat fields ──────────────────────────────
+        # description ← explanation
+        if not issue.get("description"):
+            issue["description"] = issue.get("explanation", issue.get("title", ""))
+
+        # suggestion ← suggestedFix
+        if not issue.get("suggestion"):
+            issue["suggestion"] = issue.get("suggestedFix")
+
+        # location ← exactContent (so the frontend arrow/highlight logic still works)
+        if not issue.get("location") and issue.get("exactContent"):
+            issue["location"] = {
+                "section": "document",
+                "quote": issue["exactContent"],
+                "line_hint": "middle",
+            }
 
         cleaned_issues.append(issue)
 
-    # Cap at max_issues_per_page
     cleaned_issues = cleaned_issues[:analysis_settings.max_issues_per_page]
     raw["issues"] = cleaned_issues
     return raw
