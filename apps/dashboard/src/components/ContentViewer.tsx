@@ -422,6 +422,7 @@ export interface ContentViewerProps {
   onCreateProposal: (issue: Issue) => Promise<void>
   onProposeAll: (issues: Issue[]) => Promise<void>
   onAction?: (type: string) => void
+  onNavigateToProposals?: () => void
 }
 
 export default function ContentViewer({
@@ -430,6 +431,7 @@ export default function ContentViewer({
   onCreateProposal,
   onProposeAll,
   onAction,
+  onNavigateToProposals,
 }: ContentViewerProps) {
   // ── Refs ──────────────────────────────────────────────────────────────
   const columnsRef  = useRef<HTMLDivElement>(null)
@@ -681,6 +683,14 @@ export default function ContentViewer({
               ? "✓ All proposed"
               : "Propose all fixes"}
           </button>
+          {createdProposals.size > 0 && onNavigateToProposals && (
+            <>
+              <span className="cv-header-divider" />
+              <button className="cv-goto-proposals-btn" onClick={onNavigateToProposals}>
+                View Proposals →
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -722,7 +732,12 @@ export default function ContentViewer({
       {toast && (
         <div className="cv-toast">
           <span className="cv-toast-check">✓</span>
-          {toast}
+          <span>{toast}</span>
+          {onNavigateToProposals && (
+            <button className="cv-toast-btn" onClick={onNavigateToProposals}>
+              Go to Proposals →
+            </button>
+          )}
         </div>
       )}
     </div>

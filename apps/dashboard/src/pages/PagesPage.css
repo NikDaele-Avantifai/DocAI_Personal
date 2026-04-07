@@ -468,6 +468,39 @@
   pointer-events: none;
 }
 
+/* Selectable section — user can click to activate it */
+.modal-section-selectable {
+  cursor: pointer;
+  border-radius: 8px;
+  border: 1.5px solid transparent;
+  padding: 8px;
+  margin: -8px;
+  transition: border-color 0.15s, background 0.15s, opacity 0.15s;
+}
+.modal-section-selectable:hover:not(.modal-section-active) {
+  background: rgba(0, 82, 204, 0.03);
+  opacity: 0.7;
+  pointer-events: auto;
+}
+.modal-section-active {
+  border-color: var(--color-primary, #0052CC) !important;
+  background: rgba(0, 82, 204, 0.04);
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+/* Section checkbox indicator */
+.modal-section-checkbox {
+  font-size: 15px;
+  line-height: 1;
+  color: var(--text-tertiary);
+  margin-right: 6px;
+  user-select: none;
+}
+.modal-section-checkbox.checked {
+  color: var(--color-primary, #0052CC);
+}
+
 /* ── Detected issue rows ── */
 .modal-issue-list {
   display: flex; flex-direction: column; gap: 6px;

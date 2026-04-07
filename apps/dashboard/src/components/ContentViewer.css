@@ -389,6 +389,25 @@ mark.cv-mark-amber {
 
 /* ── Propose All button ──────────────────────────────────── */
 
+.cv-goto-proposals-btn {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--color-primary, #0052CC);
+  background: transparent;
+  border: 1px solid var(--color-primary, #0052CC);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.1s, color 0.1s;
+}
+.cv-goto-proposals-btn:hover {
+  background: var(--color-primary, #0052CC);
+  color: #fff;
+}
+
 .cv-propose-all-btn {
   height: 26px;
   padding: 0 12px;
@@ -465,7 +484,26 @@ mark.cv-mark-amber {
 .cv-toast-check {
   color: #4ade80;
   font-size: 13px;
+  flex-shrink: 0;
 }
+
+.cv-toast-btn {
+  margin-left: 8px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  color: #1a1a1a;
+  background: #fff;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: opacity 0.1s;
+  pointer-events: all;
+}
+.cv-toast-btn:hover { opacity: 0.85; }
 
 @keyframes cv-toast-in {
   from { opacity: 0; transform: translateX(-50%) translateY(6px); }

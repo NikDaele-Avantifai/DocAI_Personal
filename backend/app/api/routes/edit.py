@@ -130,6 +130,13 @@ def _build_user_message(request: GenerateEditRequest) -> str:
         msg += f"Space: {request.space}\n"
     if request.remove_section_hint:
         msg += f"Section to remove: {request.remove_section_hint}\n"
+    # Combined mode: apply the improvement AND fix detected issues in one pass
+    if request.issue_title and request.issue_description:
+        msg += "\n=== ALSO FIX THESE DETECTED ISSUES (apply alongside the edit type above) ===\n"
+        msg += f"Issues: {request.issue_title}\n"
+        msg += f"Details: {request.issue_description}\n"
+        if request.issue_suggestion:
+            msg += f"Suggested fixes: {request.issue_suggestion}\n"
     msg += f"\nCurrent page content (Confluence wiki markup):\n{_html_to_wiki(request.content)}"
     return msg
 

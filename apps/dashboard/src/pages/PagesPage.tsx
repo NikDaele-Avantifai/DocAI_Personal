@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react"
+import { useNavigate } from "react-router-dom"
 import "./PagesPage.css"
 import SpaceTree, { type PageNode } from "../components/SpaceTree"
 import ContentViewer, { type Issue as ContentIssue } from "../components/ContentViewer"
@@ -58,6 +59,8 @@ function countDescendants(nodes: PageNode[]): number {
 }
 
 export default function PagesPage() {
+  const navigate = useNavigate()
+
   const [selected, setSelected] = useState<PageNode | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
 
@@ -82,12 +85,13 @@ export default function PagesPage() {
   // (proposing state is now managed inside ContentViewer)
 
   // Edit modal state
-  const [modalOpen, setModalOpen] = useState(false)
-  const [editType, setEditType] = useState<EditType>("add_summary")
-  const [selectedIssueForFix, setSelectedIssueForFix] = useState<ContentIssue | null>(null)
-  const [removeSectionHint, setRemoveSectionHint] = useState("")
-  const [editLoading, setEditLoading] = useState(false)
-  const [editError, setEditError] = useState<string | null>(null)
+  const [modalOpen,            setModalOpen]            = useState(false)
+  const [editType,             setEditType]             = useState<EditType>("add_summary")
+  const [fixIssues,            setFixIssues]            = useState(false)
+  const [applyImprovement,     setApplyImprovement]     = useState(false)
+  const [removeSectionHint,    setRemoveSectionHint]    = useState("")
+  const [editLoading,          setEditLoading]          = useState(false)
+  const [editError,            setEditError]            = useState<string | null>(null)
   const [createdProposalCount, setCreatedProposalCount] = useState(0)
 
   // Load sweep data once on mount
@@ -227,10 +231,13 @@ export default function PagesPage() {
     }
   }
 
-  function openEditModal(initialType?: EditType, issue?: ContentIssue) {
+  function openEditModal(initialType?: EditType) {
+    const hasFixable = (analysis?.issues.filter(i => !i.needs_human_intervention).length ?? 0) > 0
     setModalOpen(true)
-    setEditType(initialType ?? "add_summary")
-    setSelectedIssueForFix(issue ?? null)
+    setEditType(initialType ?? "restructure")
+    // Action buttons → improvement selected; "Propose a Fix" → issues selected (+ improvement if initialType given)
+    setFixIssues(hasFixable && !initialType ? true : hasFixable)
+    setApplyImprovement(!!initialType)
     setRemoveSectionHint("")
     setEditError(null)
     setCreatedProposalCount(0)
@@ -240,7 +247,6 @@ export default function PagesPage() {
     setModalOpen(false)
     setEditLoading(false)
     setEditError(null)
-    setSelectedIssueForFix(null)
     setCreatedProposalCount(0)
   }
 
@@ -254,73 +260,47 @@ export default function PagesPage() {
       if (!pageRes.ok) throw new Error("Could not fetch page content from Confluence")
       const pageData = await pageRes.json()
 
-      if (selectedIssueForFix) {
-        const res = await fetch(`${API_BASE}/api/edit/generate`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            page_id:           selected.id,
-            page_title:        selected.title,
-            content:           pageData.content ?? "",
-            page_version:      selected.version,
-            edit_type:         "targeted_fix",
-            space:             selected.space_key,
-            issue_title:       selectedIssueForFix.title,
-            issue_description: selectedIssueForFix.explanation ?? selectedIssueForFix.description ?? "",
-            issue_suggestion:  selectedIssueForFix.suggestedFix ?? selectedIssueForFix.suggestion,
-            issue_exact_content: selectedIssueForFix.exactContent ?? undefined,
-          }),
-        })
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}))
-          throw new Error(body.detail ?? `API error ${res.status}`)
-        }
-        setCreatedProposalCount(1)
-      } else {
-        const fixableIssues = (analysis?.issues ?? []).filter(i => !i.needs_human_intervention)
-        if (fixableIssues.length > 0) {
-          // Single proposal bundling all fixable issues
-          const res = await fetch(`${API_BASE}/api/edit/generate`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              page_id:           selected.id,
-              page_title:        selected.title,
-              content:           pageData.content ?? "",
-              page_version:      selected.version,
-              edit_type:         "targeted_fix",
-              space:             selected.space_key,
-              issue_title:       `Fix all ${fixableIssues.length} detected issue${fixableIssues.length !== 1 ? "s" : ""}`,
-              issue_description: fixableIssues.map(i => i.explanation ?? i.description ?? "").join(" | "),
-              issue_suggestion:  fixableIssues.map(i => i.suggestedFix ?? i.suggestion).filter(Boolean).join(" | "),
-            }),
-          })
-          if (!res.ok) {
-            const body = await res.json().catch(() => ({}))
-            throw new Error(body.detail ?? `API error ${res.status}`)
-          }
-          setCreatedProposalCount(1)
-        } else {
-          const res = await fetch(`${API_BASE}/api/edit/generate`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              page_id:             selected.id,
-              page_title:          selected.title,
-              content:             pageData.content ?? "",
-              page_version:        selected.version,
-              edit_type:           editType,
-              remove_section_hint: removeSectionHint || undefined,
-              space:               selected.space_key,
-            }),
-          })
-          if (!res.ok) {
-            const body = await res.json().catch(() => ({}))
-            throw new Error(body.detail ?? `API error ${res.status}`)
-          }
-          setCreatedProposalCount(1)
-        }
+      const fixableIssues = fixIssues
+        ? (analysis?.issues ?? []).filter(i => !i.needs_human_intervention)
+        : []
+
+      // Build a single request — if both options are selected, combine them
+      const payload: Record<string, unknown> = {
+        page_id:      selected.id,
+        page_title:   selected.title,
+        content:      pageData.content ?? "",
+        page_version: selected.version,
+        space:        selected.space_key,
       }
+
+      if (applyImprovement) {
+        // Use the improvement edit type; issue fields are passed alongside when fixIssues is also set
+        payload.edit_type = editType
+        if (removeSectionHint) payload.remove_section_hint = removeSectionHint
+        if (fixableIssues.length > 0) {
+          payload.issue_title       = `Fix ${fixableIssues.length} detected issue${fixableIssues.length !== 1 ? "s" : ""}`
+          payload.issue_description = fixableIssues.map(i => i.explanation ?? i.description ?? "").join(" | ")
+          payload.issue_suggestion  = fixableIssues.map(i => i.suggestedFix ?? i.suggestion).filter(Boolean).join(" | ")
+        }
+      } else {
+        // Issues only
+        payload.edit_type         = "targeted_fix"
+        payload.issue_title       = `Fix all ${fixableIssues.length} detected issue${fixableIssues.length !== 1 ? "s" : ""}`
+        payload.issue_description = fixableIssues.map(i => i.explanation ?? i.description ?? "").join(" | ")
+        payload.issue_suggestion  = fixableIssues.map(i => i.suggestedFix ?? i.suggestion).filter(Boolean).join(" | ")
+      }
+
+      const res = await fetch(`${API_BASE}/api/edit/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.detail ?? `API error ${res.status}`)
+      }
+
+      setCreatedProposalCount(1)
     } catch (e) {
       setEditError(e instanceof Error ? e.message : "Something went wrong")
     } finally {
@@ -544,6 +524,7 @@ export default function PagesPage() {
                       onCreateProposal={createProposal}
                       onProposeAll={proposeAll}
                       onAction={type => openEditModal(type as EditType)}
+                      onNavigateToProposals={() => navigate("/proposals")}
                     />
                   </>
                 ) : (
@@ -656,12 +637,18 @@ export default function PagesPage() {
 
                 <div className="modal-body">
 
-                  {analysis && analysis.issues.length > 0 && !selectedIssueForFix && (() => {
+                  {/* Issues section — toggle to include targeted fixes */}
+                  {analysis && analysis.issues.length > 0 && (() => {
                     const fixable = analysis.issues.filter(i => !i.needs_human_intervention)
                     const human   = analysis.issues.filter(i =>  i.needs_human_intervention)
                     return (
-                      <div className="modal-section">
+                      <div
+                        className={`modal-section modal-section-selectable${fixIssues ? " modal-section-active" : ""}`}
+                        onClick={() => fixable.length > 0 && setFixIssues(v => !v)}>
                         <div className="modal-section-label">
+                          <span className={`modal-section-checkbox${fixIssues ? " checked" : ""}`}>
+                            {fixIssues ? "☑" : "☐"}
+                          </span>
                           Issues to fix
                           {fixable.length > 0 && (
                             <span className="modal-fix-count">{fixable.length} fixable</span>
@@ -709,18 +696,30 @@ export default function PagesPage() {
                     )
                   })()}
 
-                  <div className={`modal-section${analysis && analysis.issues.filter(i => !i.needs_human_intervention).length > 0 && !selectedIssueForFix ? " modal-section-dimmed" : ""}`}>
+                  {/* General improvement section — clicking a card toggles it on/off */}
+                  <div className="modal-section">
                     <div className="modal-section-label">
+                      <span className={`modal-section-checkbox${applyImprovement ? " checked" : ""}`}>
+                        {applyImprovement ? "☑" : "☐"}
+                      </span>
                       {analysis && analysis.issues.length > 0
-                        ? "Or apply a general improvement"
-                        : "Choose an improvement"}
+                        ? "Also apply a general improvement"
+                        : "Apply a general improvement"}
                     </div>
                     <div className="edit-type-grid">
                       {EDIT_OPTIONS.map(opt => (
                         <button
                           key={opt.type}
-                          className={`edit-type-card${!selectedIssueForFix && editType === opt.type ? " selected" : ""}`}
-                          onClick={() => { setSelectedIssueForFix(null); setEditType(opt.type) }}>
+                          className={`edit-type-card${applyImprovement && editType === opt.type ? " selected" : ""}`}
+                          onClick={e => {
+                            e.stopPropagation()
+                            if (applyImprovement && editType === opt.type) {
+                              setApplyImprovement(false)
+                            } else {
+                              setApplyImprovement(true)
+                              setEditType(opt.type)
+                            }
+                          }}>
                           <span className="edit-type-icon">{opt.icon}</span>
                           <span className="edit-type-label">{opt.label}</span>
                           <span className="edit-type-desc">{opt.description}</span>
@@ -728,7 +727,7 @@ export default function PagesPage() {
                       ))}
                     </div>
 
-                    {!selectedIssueForFix && editType === "remove_section" && (
+                    {applyImprovement && editType === "remove_section" && (
                       <div className="modal-field">
                         <label className="modal-field-label">Which section to remove?</label>
                         <input
@@ -754,15 +753,18 @@ export default function PagesPage() {
                     onClick={submitEdit}
                     disabled={
                       editLoading ||
-                      (!selectedIssueForFix && editType === "remove_section" && !removeSectionHint.trim() && (analysis?.issues.filter(i => !i.needs_human_intervention).length ?? 0) === 0)
+                      (!fixIssues && !applyImprovement) ||
+                      (applyImprovement && editType === "remove_section" && !removeSectionHint.trim())
                     }>
                     {editLoading ? (
                       <span className="modal-loading"><span className="spinner" /> Generating…</span>
                     ) : (() => {
-                      if (selectedIssueForFix) return "Generate Proposal →"
                       const fixableCount = analysis?.issues.filter(i => !i.needs_human_intervention).length ?? 0
-                      if (fixableCount > 0) return `Fix ${fixableCount} Issue${fixableCount !== 1 ? "s" : ""} →`
-                      return "Generate Proposal →"
+                      const improvLabel  = EDIT_OPTIONS.find(o => o.type === editType)?.label ?? "Improvement"
+                      if (fixIssues && applyImprovement) return `Fix ${fixableCount} Issue${fixableCount !== 1 ? "s" : ""} + Apply ${improvLabel} →`
+                      if (fixIssues) return `Fix ${fixableCount} Issue${fixableCount !== 1 ? "s" : ""} →`
+                      if (applyImprovement) return `Apply ${improvLabel} →`
+                      return "Select an option above"
                     })()}
                   </button>
                 </div>
