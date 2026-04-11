@@ -60,6 +60,58 @@ const CHAT_STARTERS = [
   "Is this content outdated?",
 ]
 
+// ── Markdown renderer ─────────────────────────────────────────────────────────
+
+function renderInline(text: string): React.ReactNode[] {
+  const parts: React.ReactNode[] = []
+  const re = /\*\*(.+?)\*\*|`(.+?)`/g
+  let last = 0, m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index))
+    if (m[1] !== undefined) parts.push(<strong key={m.index}>{m[1]}</strong>)
+    else if (m[2] !== undefined) parts.push(<code key={m.index} className="md-code">{m[2]}</code>)
+    last = re.lastIndex
+  }
+  if (last < text.length) parts.push(text.slice(last))
+  return parts
+}
+
+function MarkdownMessage({ text }: { text: string }) {
+  const lines = text.split("\n")
+  const nodes: React.ReactNode[] = []
+  let listItems: React.ReactNode[] = []
+
+  const flushList = () => {
+    if (listItems.length) {
+      nodes.push(<ul key={`ul-${nodes.length}`} className="md-list">{listItems}</ul>)
+      listItems = []
+    }
+  }
+
+  lines.forEach((line, i) => {
+    const bulletMatch = line.match(/^[-*•]\s+(.*)/)
+    const h2Match = line.match(/^##\s+(.*)/)
+    const h3Match = line.match(/^###\s+(.*)/)
+
+    if (bulletMatch) {
+      listItems.push(<li key={i}>{renderInline(bulletMatch[1])}</li>)
+    } else {
+      flushList()
+      if (h2Match) {
+        nodes.push(<p key={i} className="md-h2">{renderInline(h2Match[1])}</p>)
+      } else if (h3Match) {
+        nodes.push(<p key={i} className="md-h3">{renderInline(h3Match[1])}</p>)
+      } else if (line.trim() === "") {
+        // skip blank lines between blocks
+      } else {
+        nodes.push(<p key={i} className="md-p">{renderInline(line)}</p>)
+      }
+    }
+  })
+  flushList()
+  return <div className="md-body">{nodes}</div>
+}
+
 // ── Issue Card ────────────────────────────────────────────────────────────────
 
 function IssueCard({ issue }: { issue: Issue }) {
@@ -257,11 +309,19 @@ function AnalyzeTab() {
 
 // ── Chat Tab ──────────────────────────────────────────────────────────────────
 
+interface PageContext {
+  title: string
+  url: string
+  content?: string
+  owner?: string
+  lastModified?: string
+}
+
 function ChatTab() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState("")
   const [streaming, setStreaming] = useState(false)
-  const [pageContext, setPageContext] = useState<{ title: string; url: string } | null>(null)
+  const [pageContext, setPageContext] = useState<PageContext | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -270,13 +330,45 @@ function ChatTab() {
   }, [messages])
 
   useEffect(() => {
-    chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
-      if (tab?.url?.includes("atlassian")) {
-        setPageContext({
-          title: tab.title?.replace(/ - Confluence.*$/, "").trim() ?? "",
-          url: tab.url ?? "",
-        })
+    chrome.tabs.query({ active: true, currentWindow: true }).then(async ([tab]) => {
+      if (!tab?.url?.includes("atlassian")) return
+
+      const base: PageContext = {
+        title: tab.title?.replace(/ - Confluence.*$/, "").trim() ?? "",
+        url: tab.url ?? "",
       }
+
+      // Try to scrape full page content
+      try {
+        const scraped = await new Promise<Record<string, unknown>>((resolve, reject) => {
+          const t = setTimeout(() => reject(new Error("timeout")), 3000)
+          chrome.tabs.sendMessage(tab.id!, { type: "SCRAPE_PAGE" }, (res) => {
+            clearTimeout(t)
+            chrome.runtime.lastError ? reject(chrome.runtime.lastError) : resolve(res)
+          })
+        })
+        if (scraped?.content) {
+          base.content = scraped.content as string
+          base.owner = scraped.owner as string | undefined
+          base.lastModified = scraped.lastModified as string | undefined
+          if (scraped.title) base.title = scraped.title as string
+        }
+      } catch {
+        try {
+          await chrome.scripting.executeScript({ target: { tabId: tab.id! }, files: ["contents/confluence.js"] })
+          await new Promise(r => setTimeout(r, 400))
+          const scraped2 = await new Promise<Record<string, unknown>>(resolve => {
+            chrome.tabs.sendMessage(tab.id!, { type: "SCRAPE_PAGE" }, res => resolve(res || {}))
+          })
+          if (scraped2?.content) {
+            base.content = scraped2.content as string
+            base.owner = scraped2.owner as string | undefined
+            base.lastModified = scraped2.lastModified as string | undefined
+          }
+        } catch { /* use base metadata only */ }
+      }
+
+      setPageContext(base)
     })
     setTimeout(() => inputRef.current?.focus(), 100)
   }, [])
@@ -292,6 +384,9 @@ function ChatTab() {
     if (pageContext) {
       context.pageTitle = pageContext.title
       context.pageUrl = pageContext.url
+      if (pageContext.content) context.pageContent = pageContext.content
+      if (pageContext.owner) context.pageOwner = pageContext.owner
+      if (pageContext.lastModified) context.pageLastModified = pageContext.lastModified
     }
 
     const history = [...messages, userMsg]
@@ -353,6 +448,9 @@ function ChatTab() {
         <div className="chat-context-bar">
           <span className="chat-context-icon">📄</span>
           <span className="chat-context-title" title={pageContext.title}>{pageContext.title || "Confluence page"}</span>
+          {pageContext.content
+            ? <span className="chat-context-badge chat-context-badge--loaded">Content loaded</span>
+            : <span className="chat-context-badge chat-context-badge--meta">Metadata only</span>}
         </div>
       )}
 
@@ -373,9 +471,13 @@ function ChatTab() {
           <div key={i} className={`chat-msg chat-msg-${msg.role}`}>
             {msg.role === "assistant" && <div className="chat-msg-av">D</div>}
             <div className="chat-msg-bubble">
-              {msg.content || (streaming && i === messages.length - 1
-                ? <span className="chat-typing"><span /><span /><span /></span>
-                : "")}
+              {msg.role === "assistant"
+                ? msg.content
+                  ? <MarkdownMessage text={msg.content} />
+                  : streaming && i === messages.length - 1
+                    ? <span className="chat-typing"><span /><span /><span /></span>
+                    : null
+                : msg.content}
             </div>
           </div>
         ))}

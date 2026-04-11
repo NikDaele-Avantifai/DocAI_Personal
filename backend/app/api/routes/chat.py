@@ -23,30 +23,56 @@ class ChatRequest(BaseModel):
     context: dict = {}
 
 
-SYSTEM_PROMPT = """You are DocAI Assistant, an expert in documentation management and Confluence.
-You help users understand their documentation health, explain detected issues, suggest improvements, and answer questions about their workspace.
-You have access to context about the current page being viewed and the overall workspace health.
-Be concise, professional, and actionable. Use bullet points for lists. Keep responses focused and avoid unnecessary filler.
+SYSTEM_PROMPT = """You are DocAI Assistant — an AI built into the DocAI platform, which helps teams keep their Confluence documentation healthy.
 
-When discussing issues, always suggest a concrete next action the user can take in the DocAI dashboard."""
+Your two core jobs:
+1. **Help users navigate and understand the DocAI platform** — the dashboard has: Overview (workspace health summary), Pages (browse all synced pages with health scores), Duplicate Detector (find near-identical pages), Proposals (AI-suggested actions like archiving or merging pages), Audit Log (history of applied changes), and Settings.
+2. **Answer questions about the specific Confluence page the user is currently viewing** — when page content is provided to you, use it directly to answer questions. Do not say you lack access; the content is given to you in the context block below.
+
+Tone: concise, direct, helpful. Use short paragraphs or bullet points. Never pad responses. If you can answer in two sentences, do so.
+
+Rules:
+- If page content is provided, answer questions about it using that content — summarise, quote, explain, compare sections, whatever the user needs.
+- If no page content is available, say so briefly and suggest the user click "Analyze This Page" in the extension to load it.
+- For navigation questions ("where do I find X?"), give the exact dashboard section name.
+- Never invent page content or workspace stats you weren't given."""
 
 
 def build_context_block(context: dict) -> str:
     parts = []
-    if context.get("currentRoute"):
+
+    # Dashboard route context
+    if context.get("currentRoute") and context["currentRoute"] != "extension":
         route = context["currentRoute"]
         route_names = {
             "/overview": "Overview", "/pages": "Pages", "/duplicates": "Duplicate Detector",
             "/proposals": "Proposals", "/audit": "Audit Log", "/batch-rename": "Batch Rename",
             "/settings": "Settings",
         }
-        parts.append(f"Current page: {route_names.get(route, route)}")
+        parts.append(f"User is viewing: {route_names.get(route, route)} in the DocAI dashboard")
+
+    # Workspace stats
     if context.get("pages"):
         parts.append(f"Total pages synced: {context['pages']}")
     if context.get("issues"):
         parts.append(f"Pending issues: {context['issues']}")
     if context.get("duplicates"):
         parts.append(f"Duplicates detected: {context['duplicates']}")
+
+    # Current Confluence page
+    if context.get("pageTitle"):
+        parts.append(f"Confluence page title: {context['pageTitle']}")
+    if context.get("pageUrl"):
+        parts.append(f"Confluence page URL: {context['pageUrl']}")
+    if context.get("pageOwner"):
+        parts.append(f"Page owner: {context['pageOwner']}")
+    if context.get("pageLastModified"):
+        parts.append(f"Last modified: {context['pageLastModified']}")
+
+    if context.get("pageContent"):
+        content = context["pageContent"][:6000]  # cap to keep tokens sane
+        parts.append(f"\n--- PAGE CONTENT (use this to answer questions) ---\n{content}\n--- END PAGE CONTENT ---")
+
     return "\n".join(parts)
 
 
