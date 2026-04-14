@@ -80,18 +80,30 @@ Do not invent new facts. Confidence 0-100 based on how clear the improvement is.
 TARGETED_FIX_SYSTEM_PROMPT = """You are DocAI. Your only task is to apply ONE precise, surgical fix to a Confluence page.
 
 STRICT RULES — you must follow every one:
-1. If EXACT CONTENT is provided: find that exact string in the page and replace it with the SUGGESTED FIX only. Nothing else changes — not even a single space, comma, or word outside those characters.
-2. If no exact content is provided: read the issue description carefully and change only the minimum text required to fix it.
-3. Do NOT rename section headings unless the issue is specifically about the heading text.
-4. Do NOT switch bullet style (keep * as *, keep # as #) unless the issue requires it.
-5. Do NOT reorder, add, or remove sections or paragraphs.
-6. Do NOT add, remove, or change blank lines except where the fix directly requires it.
-7. Do NOT change capitalisation, wording, tone, or formatting of any content unrelated to the fix.
-8. Return the FULL page content with the one change applied — everything else must be character-for-character identical to the input.
+1. Read the issue description carefully and change only the minimum text required to fix it.
+2. Do NOT rename section headings unless the issue is specifically about the heading text.
+3. Do NOT switch bullet style (keep * as *, keep # as #) unless the issue requires it.
+4. Do NOT reorder, add, or remove sections or paragraphs.
+5. Do NOT add, remove, or change blank lines except where the fix directly requires it.
+6. Do NOT change capitalisation, wording, tone, or formatting of any content unrelated to the fix.
+7. Return the FULL page content with the one change applied — everything else must be character-for-character identical to the input.
+8. If a section is truly irrelevant to the content of the page, you can delete it. Proposal would be just to delete it — if so just return 'delete' as variable.
 
 Think of it as a find-and-replace: you find the exact broken text and swap it for the corrected text. Nothing else moves.
 
-Use the SAME Confluence wiki markup style as the input.
+Use Confluence wiki markup — the same format as the input. Formatting rules:
+- Headings: h1. h2. h3. (match the original heading level exactly, e.g. "h2. Section Title")
+- Bold: *text*
+- Italic: _italic_
+- Underline: +text+
+- Strikethrough: -text-
+- Bullet list items: * item (one asterisk + space, one per line)
+- Numbered list items: # item (one hash + space, one per line)
+- Tables: ||heading1||heading2|| for header rows, |cell1|cell2| for data rows
+- Never use markdown syntax (**, __, ##) outside of the conventions above.
+- Never change formatting of content outside the targeted section.
+- Code blocks: use {code}your code here{code} for any code examples, command-line snippets, or technical syntax. Never convert code blocks to plain paragraphs.
+- Preserve existing {code} blocks exactly — do not unwrap them or convert their content to plain text.
 
 Respond with ONLY a valid JSON object:
 {
@@ -100,11 +112,52 @@ Respond with ONLY a valid JSON object:
   "confidence": 85
 }"""
 
+# Used when exactContent is known — Claude returns ONLY the replacement for the snippet.
+# Python does the substitution server-side. This is the safest mode because Claude
+# never sees or can touch the rest of the page.
+SNIPPET_FIX_SYSTEM_PROMPT = """You are DocAI. You will be shown a short text snippet that has an issue. Return ONLY the corrected replacement for that snippet.
+
+CRITICAL RULES:
+1. DELETION IS A VALID FIX: If the snippet is placeholder text, redundant, incorrect, or should simply be removed — return an empty string as the replacement. Do NOT invent new content to fill the gap.
+2. Return ONLY the replacement text for the snippet — not the surrounding page, not explanations inside the text.
+3. If the suggested fix says to remove, delete, or omit the content, return an empty string ("").
+4. Write in Confluence wiki markup. Formatting rules:
+   - Headings: h2. h3. (match original level)
+   - Bold: *text*, Italic: _text_, Underline: +text+
+   - Bullets: * item, Numbered: # item
+   - Tables: ||heading|| / |cell|
+   - Never use markdown (**, ##, __)
+   - Code blocks: use {code}your code here{code} for any code examples, command-line snippets, or technical syntax. Never convert code blocks to plain paragraphs.
+   - Preserve existing {code} blocks exactly — do not unwrap them or convert their content to plain text.
+
+Respond with ONLY a valid JSON object:
+{
+  "replacement": "the corrected text, or empty string if content should be deleted",
+  "rationale": "One sentence explaining what was wrong and what was done (e.g. 'Removed placeholder text \"test\"')",
+  "confidence": 85
+}"""
+
 
 def _build_user_message(request: GenerateEditRequest) -> str:
     today = datetime.utcnow().strftime("%Y-%m-%d")
 
     if request.edit_type == "targeted_fix" and request.issue_title:
+        # ── Snippet mode: exactContent is known ──────────────────────────────
+        # We send ONLY the broken snippet to Claude and get back just its replacement.
+        # Python does the substitution. Claude never sees the rest of the page,
+        # so it cannot accidentally modify code blocks, headings, or other content.
+        if request.issue_exact_content:
+            msg = f"Issue: {request.issue_title}\n"
+            if request.issue_description:
+                msg += f"Detail: {request.issue_description}\n"
+            if request.issue_suggestion:
+                msg += f"Suggested fix: {request.issue_suggestion}\n"
+            else:
+                msg += "Suggested fix: Remove this content entirely.\n"
+            msg += f"\nSnippet to fix:\n{request.issue_exact_content}"
+            return msg
+
+        # ── Full-page mode: no exactContent, Claude must locate the issue ────
         msg = f"Today's date: {today}\n"
         msg += f"Page title: {request.page_title}\n"
         if request.space:
@@ -115,11 +168,6 @@ def _build_user_message(request: GenerateEditRequest) -> str:
             msg += f"Detail: {request.issue_description}\n"
         if request.issue_suggestion:
             msg += f"Suggested fix: {request.issue_suggestion}\n"
-        if request.issue_exact_content:
-            msg += f"\n=== EXACT CONTENT TO REPLACE ===\n{request.issue_exact_content}\n"
-            if request.issue_suggestion:
-                msg += f"Replace it with exactly: {request.issue_suggestion}\n"
-        # Convert HTML input to wiki markup so Claude echoes wiki markup back
         msg += f"\n=== CURRENT PAGE CONTENT (Confluence wiki markup) ===\n{_html_to_wiki(request.content)}"
         return msg
 
@@ -146,6 +194,34 @@ def _html_to_wiki(text: str) -> str:
     Convert Confluence storage-format HTML to wiki-markup-like plain text so that
     diffs between the old HTML page and the new wiki-markup content are readable.
     """
+    # Strip Confluence CDATA markers before any other processing
+    text = text.replace('<![CDATA[', '')
+    text = text.replace(']]>', '')
+    # Preserve Confluence code blocks as wiki {code} macros
+    def _replace_code_block(m):
+        inner = m.group(1).strip()
+        return f'\n{{code}}\n{inner}\n{{code}}\n'
+
+    text = re.sub(
+        r'<ac:structured-macro[^>]*ac:name=["\']code["\'][^>]*>.*?<ac:plain-text-body>(.*?)</ac:plain-text-body>.*?</ac:structured-macro>',
+        _replace_code_block,
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    # Handle plain-text-body elements outside of code macros
+    text = re.sub(
+        r'<ac:plain-text-body>(.*?)</ac:plain-text-body>',
+        lambda m: f'\n{m.group(1).strip()}\n',
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    # Remove Confluence line-number spans before generic tag stripping
+    text = re.sub(
+        r'<span[^>]*(?:class="[^"]*(?:linenumber|ds-line-number)[^"]*"|data-ds--line-number)[^>]*>.*?</span>',
+        '',
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
     # Block-level elements → newlines with heading markers
     text = re.sub(r'<h([1-6])[^>]*>', lambda m: f'\nh{m.group(1)}. ', text, flags=re.IGNORECASE)
     text = re.sub(r'</h[1-6]>', '\n', text, flags=re.IGNORECASE)
@@ -201,11 +277,15 @@ async def generate_edit(body: GenerateEditRequest):
     Use Claude to generate an improved version of a page, then store it as a proposal.
     Returns the created proposal including the diff for the dashboard to display.
     """
-    system_prompt = (
-        TARGETED_FIX_SYSTEM_PROMPT
-        if body.edit_type == "targeted_fix" and body.issue_title
-        else EDIT_SYSTEM_PROMPT
-    )
+    is_targeted = body.edit_type == "targeted_fix" and bool(body.issue_title)
+    use_snippet_mode = is_targeted and bool(body.issue_exact_content)
+
+    if use_snippet_mode:
+        system_prompt = SNIPPET_FIX_SYSTEM_PROMPT
+    elif is_targeted:
+        system_prompt = TARGETED_FIX_SYSTEM_PROMPT
+    else:
+        system_prompt = EDIT_SYSTEM_PROMPT
 
     message = client.messages.create(
         model="claude-sonnet-4-20250514",
@@ -235,9 +315,37 @@ async def generate_edit(body: GenerateEditRequest):
             detail=f"Claude returned invalid JSON: {exc}",
         )
 
-    new_content: str = parsed.get("new_content", "")
     rationale: str = parsed.get("rationale", "No rationale provided.")
     confidence: int = int(parsed.get("confidence", 80))
+
+    is_deletion = False
+    if use_snippet_mode:
+        # Snippet mode: Claude returns only the replacement text for the snippet.
+        # We do the substitution server-side so nothing else in the page changes.
+        replacement: str = parsed.get("replacement", "")
+        # Empty replacement = deletion
+        is_deletion = replacement.strip() == ""
+        wiki_content = _html_to_wiki(body.content)
+        exact = body.issue_exact_content or ""
+        if exact and exact in wiki_content:
+            new_content = wiki_content.replace(exact, replacement, 1)
+        else:
+            # Fallback: exact string not found verbatim — try a stripped comparison
+            stripped_exact = exact.strip()
+            stripped_wiki = wiki_content
+            if stripped_exact and stripped_exact in stripped_wiki:
+                new_content = stripped_wiki.replace(stripped_exact, replacement, 1)
+            else:
+                # Cannot locate the exact content — return the page unchanged so
+                # the diff shows nothing rather than garbling the document.
+                new_content = wiki_content
+                is_deletion = False
+                rationale = f"[Snippet not found in page — no change applied] {rationale}"
+    else:
+        raw_new_content: str = parsed.get("new_content", "")
+        # Claude signals "delete this section" by returning the literal string "delete"
+        is_deletion = raw_new_content.strip().lower() == "delete"
+        new_content = "" if is_deletion else raw_new_content
 
     diff_lines = _generate_diff_lines(body.content, new_content)
 
@@ -258,6 +366,7 @@ async def generate_edit(body: GenerateEditRequest):
         "rationale": rationale,
         "diff": json.dumps(diff_lines),
         "new_content": new_content,
+        "is_deletion": is_deletion,
         "page_version": body.page_version,
         "space": body.space,
         "confidence": confidence,

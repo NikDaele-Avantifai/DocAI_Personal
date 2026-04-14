@@ -3,7 +3,6 @@ import React, {
   useState,
   useRef,
   useMemo,
-  useLayoutEffect,
   useEffect,
   useCallback,
   type ReactNode,
@@ -41,10 +40,6 @@ export type Issue = {
 }
 
 // ── Accessors (v1 + v2) ────────────────────────────────────────────────────
-
-function issueExplanation(issue: Issue): string {
-  return issue.explanation ?? issue.description ?? ""
-}
 
 function issueSuggestion(issue: Issue): string | null | undefined {
   return issue.suggestedFix ?? issue.suggestion
@@ -329,24 +324,26 @@ interface AnnotationCardProps {
   created: boolean
   proposing: boolean
   active: boolean
+  dismissed: boolean
+  dismissing: boolean
   cardRef: (el: HTMLDivElement | null) => void
   onClick: () => void
   onPropose: (e: React.MouseEvent) => void
+  onDismiss: (e: React.MouseEvent) => void
 }
 
-function AnnotationCard({ issue, created, proposing, active, cardRef, onClick, onPropose }: AnnotationCardProps) {
+function AnnotationCard({ issue, created, proposing, active, dismissed, dismissing, cardRef, onClick, onPropose, onDismiss }: AnnotationCardProps) {
   const needsHuman  = issueNeedsHuman(issue)
   const color       = needsHuman ? "var(--border)" : (SEV_COLOR[issue.severity] ?? SEV_COLOR.low)
   const label       = SEV_LABEL[issue.severity] ?? "Low"
   const quote       = issueQuote(issue)
   const shortQuote  = quote ? (quote.length > 60 ? quote.slice(0, 57) + "…" : quote) : null
   const suggestion  = issueSuggestion(issue)
-  const explanation = issueExplanation(issue)
 
   return (
     <div
       ref={cardRef}
-      className={`cv-card${active ? " cv-card-active" : ""}${needsHuman ? " cv-card-human" : ""}`}
+      className={`cv-card${active ? " cv-card-active" : ""}${needsHuman ? " cv-card-human" : ""}${dismissed ? " cv-card-dismissed" : ""}`}
       onClick={onClick}>
       <div className="cv-card-header" style={{ borderLeftColor: color }}>
         {needsHuman
@@ -360,8 +357,7 @@ function AnnotationCard({ issue, created, proposing, active, cardRef, onClick, o
         {shortQuote && <div className="cv-card-quote">"{shortQuote}"</div>}
         {needsHuman ? (
           <div className="cv-human-block">
-            <div className="cv-human-label">Human review required</div>
-            <div className="cv-human-action">{issue.human_action_needed ?? explanation}</div>
+            <div className="cv-human-action">{issue.human_action_needed ?? "Human review required"}</div>
           </div>
         ) : (
           <div className="cv-card-suggestion">{suggestion}</div>
@@ -369,7 +365,20 @@ function AnnotationCard({ issue, created, proposing, active, cardRef, onClick, o
       </div>
       <div className="cv-card-footer">
         {needsHuman ? (
-          <span className="cv-human-note">Edit directly in Confluence</span>
+          <div className="cv-human-footer">
+            <span className="cv-human-note">Edit directly in Confluence</span>
+            <button
+              className={`cv-dismiss-btn${dismissed ? " cv-dismiss-done" : ""}`}
+              disabled={dismissed || dismissing}
+              onClick={onDismiss}
+              title="Mark this issue as reviewed and valid — Claude won't raise it again">
+              {dismissing
+                ? <span className="cv-btn-spinner" />
+                : dismissed
+                ? "✓ Marked valid"
+                : "Mark as valid"}
+            </button>
+          </div>
         ) : (
           <button
             className={`cv-propose-btn${created ? " cv-propose-done" : ""}`}
@@ -419,6 +428,7 @@ export interface ContentViewerProps {
   content: string
   issues: Issue[]
   pageTitle: string
+  pageId?: string
   onCreateProposal: (issue: Issue) => Promise<void>
   onProposeAll: (issues: Issue[]) => Promise<void>
   onAction?: (type: string) => void
@@ -428,6 +438,7 @@ export interface ContentViewerProps {
 export default function ContentViewer({
   content,
   issues,
+  pageId,
   onCreateProposal,
   onProposeAll,
   onAction,
@@ -466,6 +477,8 @@ export default function ContentViewer({
   const [proposingKey,     setProposingKey]     = useState<string | null>(null)
   const [proposingAll,     setProposingAll]     = useState(false)
   const [toast,            setToast]            = useState<string | null>(null)
+  const [dismissedKeys,    setDismissedKeys]    = useState<Set<string>>(new Set())
+  const [dismissingKey,    setDismissingKey]    = useState<string | null>(null)
   const [svgData,          setSvgData]          = useState<{ lines: ConnectorLine[]; height: number }>({
     lines: [],
     height: 0,
@@ -504,6 +517,12 @@ export default function ContentViewer({
         const markRect = markEl.getBoundingClientRect()
         entries.push({ key: ann.key, desiredTop: markRect.top - containerRect.top })
       } else {
+        // Warn when a text-issue with exactContent has no matching highlight in the DOM
+        if (ann.issue.type === "text-issue" && ann.issue.exactContent) {
+          console.warn(
+            `[ContentViewer] No highlight found for issue "${ann.issue.id ?? ann.issue.title}" — exactContent did not match any text in the rendered document`
+          )
+        }
         entries.push({ key: ann.key, desiredTop: 12 })
       }
     }
@@ -525,17 +544,22 @@ export default function ContentViewer({
     const contentHeight = Math.max(leftColRef.current.scrollHeight, lastBottom + 20)
     rightColRef.current.style.minHeight = `${contentHeight}px`
 
-    // 4. Draw connectors — only for issues that have a visible mark
+    // 4. Draw connectors — for all text-issues that have both a mark and a card in the DOM
     const newLines: ConnectorLine[] = []
     for (const ann of annotations) {
+      if (ann.issue.type === "general-issue") continue  // never render arrows for general-issue
       const markEl = markRefs.current.get(ann.key)
       const cardEl = cardRefs.current.get(ann.key)
-      if (!markEl || !cardEl) continue  // no mark → no connector (covers general-issue)
+      if (!markEl) {
+        if (ann.issue.type === "text-issue" && ann.issue.exactContent) {
+          console.warn(`[ContentViewer] No highlight found for issue "${ann.issue.id ?? ann.issue.title}"`)
+        }
+        continue
+      }
+      if (!cardEl) continue
 
+      // Use container-relative coordinates — no viewport visibility check
       const markRect = markEl.getBoundingClientRect()
-      // Hide arrow when mark is scrolled out of the visible viewport
-      if (markRect.bottom < 0 || markRect.top > window.innerHeight) continue
-
       const cardRect = cardEl.getBoundingClientRect()
       newLines.push({
         key: ann.key,
@@ -550,7 +574,11 @@ export default function ContentViewer({
     setSvgData({ lines: newLines, height: contentHeight })
   }, [annotations])
 
-  useLayoutEffect(() => { calculatePositions() }, [calculatePositions])
+  // 150ms delay ensures mark refs are fully populated before calculating positions.
+  useEffect(() => {
+    const t = setTimeout(calculatePositions, 150)
+    return () => clearTimeout(t)
+  }, [calculatePositions])
 
   useEffect(() => {
     const ro = new ResizeObserver(calculatePositions)
@@ -558,9 +586,22 @@ export default function ContentViewer({
     return () => ro.disconnect()
   }, [calculatePositions])
 
+  // Scroll on the center content panel only — not the whole window
   useEffect(() => {
-    window.addEventListener("scroll", calculatePositions, { passive: true })
-    return () => window.removeEventListener("scroll", calculatePositions)
+    const leftEl = leftColRef.current
+    if (leftEl) leftEl.addEventListener("scroll", calculatePositions, { passive: true })
+    return () => {
+      if (leftEl) leftEl.removeEventListener("scroll", calculatePositions)
+    }
+  }, [calculatePositions])
+
+  // MutationObserver: recalculate when the content DOM changes (e.g. after analysis renders)
+  useEffect(() => {
+    const leftEl = leftColRef.current
+    if (!leftEl) return
+    const mo = new MutationObserver(calculatePositions)
+    mo.observe(leftEl, { childList: true, subtree: true })
+    return () => mo.disconnect()
   }, [calculatePositions])
 
   // ── Handlers ──────────────────────────────────────────────────────────
@@ -576,6 +617,29 @@ export default function ContentViewer({
       // leave button in un-proposed state so user can retry
     } finally {
       setProposingKey(null)
+    }
+  }
+
+  async function handleDismiss(issue: Issue) {
+    if (!pageId) return
+    const k = issueKey(issue)
+    if (dismissedKeys.has(k) || dismissingKey === k) return
+    setDismissingKey(k)
+    try {
+      await fetch(`http://localhost:8000/api/pages/${pageId}/dismiss`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          issue_id: issue.id ?? k,
+          issue_title: issue.title,
+          exact_content: issue.exactContent ?? issue.location?.quote ?? null,
+        }),
+      })
+      setDismissedKeys(prev => new Set([...prev, k]))
+    } catch {
+      // leave in un-dismissed state so user can retry
+    } finally {
+      setDismissingKey(null)
     }
   }
 
@@ -715,12 +779,15 @@ export default function ContentViewer({
                 created={createdProposals.has(k)}
                 proposing={proposingKey === k}
                 active={activeKey === k}
+                dismissed={dismissedKeys.has(k)}
+                dismissing={dismissingKey === k}
                 cardRef={el => {
                   if (el) cardRefs.current.set(k, el)
                   else    cardRefs.current.delete(k)
                 }}
                 onClick={() => setActiveKey(k === activeKey ? null : k)}
                 onPropose={e => { e.stopPropagation(); handlePropose(issue) }}
+                onDismiss={e => { e.stopPropagation(); handleDismiss(issue) }}
               />
             ))}
           </div>

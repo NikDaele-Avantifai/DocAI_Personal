@@ -130,6 +130,40 @@ export default function OverviewPage() {
     }).catch(() => {}).finally(() => setLoading(false))
   }, [])
 
+  // Immediately update health state when a proposal is applied in ApprovalsPage
+  useEffect(() => {
+    function onHealthUpdated(e: Event) {
+      const { pageId, isHealthy } = (e as CustomEvent).detail
+
+      // Update sweep: remove the page from at_risk_pages if now healthy
+      setSweep(prev => {
+        if (!prev) return prev
+        if (!isHealthy) return prev
+        const wasAtRisk = prev.at_risk_pages.some(p => p.id === pageId)
+        if (!wasAtRisk) return prev
+        const newAtRisk = prev.at_risk_pages.filter(p => p.id !== pageId)
+        return {
+          ...prev,
+          at_risk_pages: newAtRisk,
+          pages_at_risk: Math.max(0, prev.pages_at_risk - 1),
+          pages_healthy: prev.pages_healthy + 1,
+        }
+      })
+
+      // Update stats: recalculate pages_healthy for the health score
+      setStats(prev => {
+        if (!prev) return prev
+        if (!isHealthy) return prev
+        return {
+          ...prev,
+          pages_healthy: prev.pages_healthy + 1,
+        }
+      })
+    }
+    window.addEventListener("docai:pageHealthUpdated", onHealthUpdated)
+    return () => window.removeEventListener("docai:pageHealthUpdated", onHealthUpdated)
+  }, [])
+
   async function runSweep() {
     setSweepLoading(true)
     try {

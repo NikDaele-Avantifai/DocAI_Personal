@@ -2,6 +2,7 @@ import { useState, useEffect } from "react"
 import "./SpaceTree.css"
 
 const API_BASE = "http://localhost:8000"
+const HEALTH_STALE_DAYS = 180
 
 export type PageNode = {
   id: string
@@ -14,6 +15,9 @@ export type PageNode = {
   owner: string | null
   version: number
   is_healthy: boolean
+  last_fixed_at: string | null
+  health_checked_at: string | null
+  has_been_analyzed: boolean
   children: PageNode[]
 }
 
@@ -30,6 +34,7 @@ interface SpaceTreeProps {
   selectedPageId: string | null
   refreshKey: number
   sweepFlags?: Record<string, string[]>
+  analysisHealth?: Record<string, boolean>  // pageId → true=healthy, false=has issues
 }
 
 function countPages(nodes: PageNode[]): number {
@@ -42,24 +47,45 @@ function PageTreeItem({
   onSelect,
   selectedId,
   sweepFlags,
+  analysisHealth,
+  dismissedSweep,
+  onDismissSweep,
 }: {
   page: PageNode
   depth: number
   onSelect: (p: PageNode) => void
   selectedId: string | null
   sweepFlags?: Record<string, string[]>
+  analysisHealth?: Record<string, boolean>
+  dismissedSweep: Set<string>
+  onDismissSweep: (id: string) => void
 }) {
   const [expanded, setExpanded] = useState(depth === 0)
   const hasChildren = page.children.length > 0
   const flags = sweepFlags?.[page.id] ?? []
-  const hasIssues = flags.length > 0
+  const hasSweepAlert = flags.length > 0 && !dismissedSweep.has(page.id)
+
+  // Indicator: DB is source of truth (persists across refreshes)
+  // Session result overrides only for immediate feedback within the current session
+  type Indicator = "healthy" | "healthy-stale" | "issues" | "grey"
+  let indicator: Indicator
+  const sessionResult = analysisHealth?.[page.id]
+  if (sessionResult === true || (page.is_healthy && page.health_checked_at)) {
+    const checkedAt = page.health_checked_at ? new Date(page.health_checked_at).getTime() : Date.now()
+    const daysSince = (Date.now() - checkedAt) / 86_400_000
+    indicator = daysSince <= HEALTH_STALE_DAYS ? "healthy" : "healthy-stale"
+  } else if (sessionResult === false || (!page.is_healthy && page.has_been_analyzed)) {
+    indicator = "issues"
+  } else {
+    indicator = "grey"
+  }
 
   return (
     <div>
       <div
         className={`tree-page-row${selectedId === page.id ? " selected" : ""}`}
         style={{ paddingLeft: `${14 + depth * 14}px` }}
-        onClick={() => onSelect(page)}>
+        onClick={() => { onSelect(page); if (hasSweepAlert) onDismissSweep(page.id) }}>
 
         <span
           className={`tree-chevron${hasChildren ? "" : " invisible"}`}
@@ -74,14 +100,28 @@ function PageTreeItem({
         <span className="tree-page-icon">{hasChildren ? "⊟" : "◫"}</span>
         <span className="tree-page-title">{page.title}</span>
 
-        {hasIssues ? (
+        {!hasChildren && hasSweepAlert && (
           <span
-            className={`tree-issue-dot${flags.length >= 2 ? " tree-issue-dot-red" : " tree-issue-dot-amber"}`}
-            title="Issues detected by sweep — analyze to find exact fixes"
-          />
-        ) : (page.is_healthy && !hasChildren && (
-          <span className="tree-healthy-check" title="No issues detected">✓</span>
-        ))}
+            className="tree-sweep-alert"
+            title={`Sweep found ${flags.length} flag${flags.length > 1 ? "s" : ""} — click to dismiss`}
+            onClick={e => { e.stopPropagation(); onDismissSweep(page.id) }}>
+            !
+          </span>
+        )}
+
+        {!hasChildren && indicator === "healthy" && (
+          <span className="tree-issue-dot tree-issue-dot-green" title="No issues — page is healthy" />
+        )}
+        {!hasChildren && indicator === "healthy-stale" && (
+          <span className="tree-issue-dot tree-issue-dot-yellow" title={`Last verified healthy ${Math.floor((Date.now() - new Date(page.health_checked_at!).getTime()) / 2_592_000_000)} months ago — consider re-analyzing`}>⚠</span>
+        )}
+        {!hasChildren && indicator === "issues" && (
+          <span className="tree-issue-dot tree-issue-dot-amber" title="Has open issues from latest analysis" />
+        )}
+        {!hasChildren && indicator === "grey" && (
+          <span className="tree-issue-dot tree-issue-dot-grey" title="Never analyzed" />
+        )}
+
         {hasChildren && (
           <span className="tree-count">{page.children.length}</span>
         )}
@@ -97,6 +137,9 @@ function PageTreeItem({
               onSelect={onSelect}
               selectedId={selectedId}
               sweepFlags={sweepFlags}
+              analysisHealth={analysisHealth}
+              dismissedSweep={dismissedSweep}
+              onDismissSweep={onDismissSweep}
             />
           ))}
         </div>
@@ -110,6 +153,7 @@ export default function SpaceTree({
   selectedPageId,
   refreshKey,
   sweepFlags,
+  analysisHealth,
 }: SpaceTreeProps) {
   const [spaces, setSpaces] = useState<Space[]>([])
   const [expandedSpaces, setExpandedSpaces] = useState<Set<string>>(new Set())
@@ -117,6 +161,7 @@ export default function SpaceTree({
   const [loadingTree, setLoadingTree] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [dismissedSweep, setDismissedSweep] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     setLoading(true)
@@ -126,6 +171,28 @@ export default function SpaceTree({
       .then(data => setSpaces(data.spaces ?? []))
       .catch(() => setError("Could not reach backend. Is it running on port 8000?"))
       .finally(() => setLoading(false))
+  }, [refreshKey])
+
+  // Re-fetch trees for all currently expanded spaces when refreshKey changes
+  // (e.g. after analysis updates is_healthy / health_checked_at in the DB)
+  useEffect(() => {
+    if (expandedSpaces.size === 0) return
+    const keys = Array.from(expandedSpaces)
+    Promise.all(
+      keys.map(spaceKey =>
+        fetch(`${API_BASE}/api/sync/spaces/${encodeURIComponent(spaceKey)}/tree`)
+          .then(r => r.json())
+          .then(data => ({ spaceKey, tree: data.tree ?? [] }))
+          .catch(() => ({ spaceKey, tree: [] }))
+      )
+    ).then(results => {
+      setTrees(prev => {
+        const next = { ...prev }
+        for (const { spaceKey, tree } of results) next[spaceKey] = tree
+        return next
+      })
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey])
 
   async function toggleSpace(spaceKey: string) {
@@ -218,6 +285,9 @@ export default function SpaceTree({
                       onSelect={onPageSelect}
                       selectedId={selectedPageId}
                       sweepFlags={sweepFlags}
+                      analysisHealth={analysisHealth}
+                      dismissedSweep={dismissedSweep}
+                      onDismissSweep={id => setDismissedSweep(prev => new Set([...prev, id]))}
                     />
                   ))
                 )}

@@ -257,10 +257,19 @@ class SyncService:
 
     async def get_space_tree(self, space_key: str) -> list[dict[str, Any]]:
         """Return pages for a space as a nested tree."""
+        from app.models.page_analysis import PageAnalysis
+
         result = await self.session.execute(
             select(Page).where(Page.space_key == space_key).order_by(Page.title)
         )
         pages = result.scalars().all()
+
+        # Fetch the set of page IDs that have at least one analysis record
+        analyzed_result = await self.session.execute(
+            select(PageAnalysis.page_id).distinct()
+            .where(PageAnalysis.page_id.in_([p.id for p in pages]))
+        )
+        analyzed_ids: set[str] = {row[0] for row in analyzed_result.all()}
 
         flat = [
             {
@@ -274,6 +283,9 @@ class SyncService:
                 "owner": p.owner,
                 "version": p.version,
                 "is_healthy": getattr(p, "is_healthy", False),
+                "last_fixed_at": getattr(p, "last_fixed_at", None),
+                "health_checked_at": getattr(p, "health_checked_at", None),
+                "has_been_analyzed": p.id in analyzed_ids,
             }
             for p in pages
         ]

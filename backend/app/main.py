@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.api.routes import health, confluence, proposals, audit, analyze, edit, stats, batch, rollback, duplicates
-from app.api.routes import sync, chat, analysis_settings, sweep
+from app.api.routes import sync, chat, analysis_settings, sweep, dismissed
 from app.db.database import init_db
 
 
@@ -54,3 +54,4 @@ app.include_router(duplicates.router, prefix="/api/duplicates", tags=["duplicate
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(analysis_settings.router, prefix="/api/settings", tags=["settings"])
 app.include_router(sweep.router, prefix="/api/sweep", tags=["sweep"])
+app.include_router(dismissed.router, prefix="/api/pages", tags=["dismissed"])

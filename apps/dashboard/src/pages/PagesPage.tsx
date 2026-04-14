@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useMemo } from "react"
 import { useNavigate } from "react-router-dom"
 import "./PagesPage.css"
 import SpaceTree, { type PageNode } from "../components/SpaceTree"
@@ -94,6 +94,24 @@ export default function PagesPage() {
   const [editError,            setEditError]            = useState<string | null>(null)
   const [createdProposalCount, setCreatedProposalCount] = useState(0)
 
+  // Listen for health updates triggered after a proposal is applied
+  useEffect(() => {
+    function onHealthUpdated(e: Event) {
+      const { pageId, isHealthy, analysis } = (e as CustomEvent).detail
+      setAnalyses(prev => ({ ...prev, [pageId]: analysis }))
+      // If the now-healthy page was in the sweep flags, remove its flags
+      if (isHealthy) {
+        setSweepPageFlags(prev => {
+          const next = { ...prev }
+          delete next[pageId]
+          return next
+        })
+      }
+    }
+    window.addEventListener("docai:pageHealthUpdated", onHealthUpdated)
+    return () => window.removeEventListener("docai:pageHealthUpdated", onHealthUpdated)
+  }, [])
+
   // Load sweep data once on mount
   useEffect(() => {
     fetch(`${API_BASE}/api/sweep/latest`)
@@ -164,6 +182,7 @@ export default function PagesPage() {
       if (!analyzeRes.ok) throw new Error("Analysis failed")
       const result: AnalysisResult = await analyzeRes.json()
       setAnalyses(prev => ({ ...prev, [pageId]: result }))
+      setRefreshKey(k => k + 1)
     } catch (e) {
       setAnalyzeError(e instanceof Error ? e.message : "Analysis failed")
     } finally {
@@ -309,6 +328,16 @@ export default function PagesPage() {
   }
 
   // ── Derived ────────────────────────────────────────────────────────────────
+
+  // Map of pageId → healthy boolean, derived from analysis results
+  const analysisHealth = useMemo<Record<string, boolean>>(() => {
+    const map: Record<string, boolean> = {}
+    for (const [id, result] of Object.entries(analyses)) {
+      map[id] = result.is_healthy && result.issues.length === 0
+    }
+    return map
+  }, [analyses])
+
   const analysis    = selected ? analyses[selected.id] : null
   const isAnalyzing = selected ? analyzingId === selected.id : false
   const isFolder    = (selected?.children.length ?? 0) > 0
@@ -343,6 +372,7 @@ export default function PagesPage() {
           selectedPageId={selected?.id ?? null}
           refreshKey={refreshKey}
           sweepFlags={sweepPageFlags}
+          analysisHealth={analysisHealth}
         />
       </div>
 
@@ -533,6 +563,7 @@ export default function PagesPage() {
                     content={pageContents[selected.id] ?? ""}
                     issues={analysis.issues as ContentIssue[]}
                     pageTitle={selected.title}
+                    pageId={selected.id}
                     onCreateProposal={createProposal}
                     onProposeAll={proposeAll}
                     onAction={type => openEditModal(type as EditType)}

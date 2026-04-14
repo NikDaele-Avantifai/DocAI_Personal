@@ -25,6 +25,7 @@ type Proposal = {
   confidence?: number
   diff: DiffLine[] | string
   new_content?: string
+  is_deletion?: boolean
 }
 
 // Normalise fields from the API (snake_case) into the shape the UI expects
@@ -138,10 +139,36 @@ export default function ApprovalsPage() {
       setProposals((prev: NormalisedProposal[]) => prev.map((p: NormalisedProposal) => p.id === selected.id ? { ...p, status: "applied" } : p))
       setSelected((prev: NormalisedProposal | null) => prev?.id === selected.id ? { ...prev, status: "applied" } : prev)
 
-      // Re-fetch the page from Confluence into the DB so the next analysis gets fresh content
+      // Re-fetch the page from Confluence into the DB, then re-analyze it to update health status
       const pageId = selected.source_page_id
       if (pageId) {
-        fetch(`${API_BASE}/api/sync/pages/${pageId}`).catch(() => {/* best-effort */})
+        try {
+          const pageData = await fetch(`${API_BASE}/api/sync/pages/${pageId}`).then(r => r.json())
+          const analyzeRes = await fetch(`${API_BASE}/api/analyze/?force_refresh=true`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              url:           pageData.url ?? "",
+              title:         pageData.title ?? selected.pageTitle,
+              content:       pageData.content ?? "",
+              last_modified: pageData.last_modified ?? null,
+              owner:         pageData.owner ?? null,
+              page_id:       pageId,
+              page_version:  pageData.version ?? 1,
+            }),
+          })
+          if (analyzeRes.ok) {
+            const result = await analyzeRes.json()
+            // Broadcast the updated health status so PagesPage and OverviewPage can react
+            window.dispatchEvent(new CustomEvent("docai:pageHealthUpdated", {
+              detail: {
+                pageId,
+                isHealthy: result.is_healthy && result.issues.length === 0,
+                analysis: result,
+              },
+            }))
+          }
+        } catch {/* best-effort — apply already succeeded */}
       }
     } catch (e) {
       setApplyError(e instanceof Error ? e.message : "Something went wrong")
@@ -250,8 +277,8 @@ export default function ApprovalsPage() {
               </div>
             </div>
 
-            {/* Tabs — only shown when there is editable AI content */}
-            {selected.new_content && (
+            {/* Tabs — only shown when there is editable AI content and it's not a deletion */}
+            {selected.new_content && !selected.is_deletion && (
               <div className="content-tabs">
                 <button
                   className={`content-tab${rightTab === "diff" ? " active" : ""}`}
@@ -279,9 +306,11 @@ export default function ApprovalsPage() {
             {rightTab === "diff" && (
             <div className="diff-view">
               <div className="diff-view-header">
-                <span className="diff-view-title">Proposed Changes</span>
+                <span className="diff-view-title">
+                  {selected.is_deletion ? "Deletion Proposal" : "Proposed Changes"}
+                </span>
                 <div className="diff-legend">
-                  <span className="legend-add">+ added</span>
+                  {!selected.is_deletion && <span className="legend-add">+ added</span>}
                   <span className="legend-remove">− removed</span>
                 </div>
               </div>

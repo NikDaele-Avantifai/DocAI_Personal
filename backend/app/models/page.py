@@ -38,6 +38,8 @@ class Page(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     content_hash: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
     is_healthy: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    last_fixed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    health_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     embedding: Mapped[Optional[list[float]]] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
     synced_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

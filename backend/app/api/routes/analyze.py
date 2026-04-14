@@ -3,8 +3,6 @@ from pydantic import BaseModel
 from typing import Literal, Optional
 import anthropic
 import json
-import re
-import html as html_module
 import uuid as _uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +13,8 @@ from app.db.database import get_db
 from app.models.page_analysis import PageAnalysis
 from app.models.page import Page
 from app.models.analysis_settings import AnalysisSettings, WorkspaceSettings
+from app.models.dismissed_issue import DismissedIssue
+from app.api.routes.edit import _html_to_wiki
 from datetime import datetime, timezone
 
 router = APIRouter()
@@ -207,6 +207,60 @@ Your job is to analyze a Confluence page and identify documentation quality issu
 You must respond with ONLY a valid JSON object — no preamble, no markdown, no explanation.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 1 — CLASSIFY THE DOCUMENT TYPE:
+Before raising any issue, classify this page into one of:
+- "technical-reference": API docs, SDK guides, endpoint references, token/auth specs, HTTP header tables, code examples
+- "process-document": runbooks, SOPs, how-to guides, step-by-step workflows
+- "policy-document": compliance policies, security policies, governance rules
+- "meeting-notes": meeting minutes, decision logs, retrospectives
+- "knowledge-base": general informational articles, FAQs, overviews
+- "empty-or-stub": page with little or no meaningful content
+
+Apply context-aware judgment based on the document type:
+- TECHNICAL REFERENCE DOCUMENTS: NEVER flag code examples, API endpoints, token formats, HTTP headers, command syntax, or configuration snippets as issues. These are intentional technical content, not problems.
+- PROCESS DOCUMENTS: structure and completeness matter; missing steps are valid issues.
+- POLICY DOCUMENTS: owner, review date, and compliance sections are critical.
+- MEETING NOTES / KNOWLEDGE BASE: apply a lighter touch; informal structure is expected.
+- EMPTY OR STUB: flag as unstructured only if no content is present whatsoever.
+
+CHARITABLE INTERPRETATION — before raising any issue, ask:
+"Could this content be intentional given the document type?" If yes, do not raise it.
+
+MINIMUM VIABLE ISSUES — only raise an issue if it would:
+(a) genuinely confuse a reader trying to use the document, OR
+(b) create a real compliance or operational risk.
+Do NOT raise cosmetic, stylistic, or subjective issues.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+HARD EXCLUSIONS — NEVER raise issues about these, regardless of document type:
+
+1. Authentication header syntax in technical docs:
+   WRONG: Flagging "Authorization: token" as incomplete because it should be "Authorization: Bearer"
+   REASON: This page IS the documentation for how the auth system works. The token format shown IS the correct format for this system. DocAI cannot know what authentication scheme the company uses — do not apply generic HTTP auth standards to documentation examples.
+
+2. Internal URLs and endpoints:
+   WRONG: Flagging "http://api.internal.com/v1/auth" as broken or needing verification
+   REASON: Internal URLs are intentionally internal. DocAI cannot resolve them. Do not flag internal hostnames.
+
+3. Placeholder examples that are clearly intentional:
+   WRONG: Flagging "Authorization: token abc123" as incomplete
+   REASON: "abc123" is an example token, not a real one. Placeholder values in code examples are intentional.
+
+4. Technical specifications that differ from common standards:
+   WRONG: Suggesting a company change their API auth format to match a different standard
+   REASON: DocAI is a documentation quality tool, not an architecture review tool. Never suggest changing how a system works — only flag documentation quality problems.
+
+THE TEST: Ask "Is this a problem with the DOCUMENTATION, or a problem with the SYSTEM being documented?"
+If it's a system design choice → NOT your job → do not flag it.
+If it's genuinely confusing or incorrect documentation → flag it.
+
+EXPLICIT SIGNALS TO ALWAYS FLAG:
+- Any text containing 'deleted last year', 'no longer exists', 'was removed', 'deprecated',
+  'no longer available', 'has been shut down' — these are outdated_reference issues and
+  must always be flagged regardless of document type.
+- 'Updated by: nobody', 'Author: unknown', 'Owner: TBD' — always flag as unowned.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 ISSUE CATEGORIES YOU CAN DETECT:
 {issue_types_block}
 
@@ -229,7 +283,17 @@ ISSUE OBJECT FORMAT — every issue must follow this exact shape:
   "confidence": 0.9
 }}
 
+CONFLUENCE RENDERING ARTEFACTS — NEVER FLAG THESE AS ISSUES:
+The page content you receive has been extracted from Confluence storage-format HTML. The following patterns are normal rendering artefacts, not documentation problems:
+- Empty lines at the very start or end of a code block (Confluence adds a blank line 1 and a blank trailing line around all code block content)
+- "]]>" appearing in or near code blocks (CDATA marker from Confluence's plain-text-body elements)
+- Line numbers or numbering prefixes inside code blocks (e.g. "1", "2", "3" on their own lines — these are injected by the Confluence renderer)
+- Code blocks that appear to have only whitespace on line 1 or the last line
+- ']]>' or '<![CDATA[' appearing anywhere in the content — these are XML markers from Confluence's code block storage format, not page content. Never flag them, never include them in exactContent, never reference them in any issue.
+Do NOT raise any issue whose root cause is one of the above patterns. Do NOT suggest that code examples be "properly formatted" when the only problem is an empty first/last line from Confluence rendering.
+
 RULES — follow every one:
+- The confluence page is something separate than the content and is present, do not add the page name into the content.
 
 1. TYPE FIELD:
    - Use "text-issue" when the issue is tied to a specific piece of text in the page.
@@ -290,29 +354,13 @@ FULL RESPONSE FORMAT (JSON only, no markdown):
 Return between 0 and {max_issues} issues. If the page is healthy, return empty issues, is_healthy: true, positive summary."""
 
 
-# ── HTML → plain text (mirrors stripHtml in ContentViewer.tsx) ────────────────
-
-def _strip_html_for_analysis(html_content: str) -> str:
-    """Convert Confluence HTML to plain text before sending to Claude.
-    Must mirror the stripHtml logic in ContentViewer.tsx so that Claude's
-    verbatim quotes can be found in the displayed text."""
-    text = re.sub(r'<br\s*/?>', '\n', html_content, flags=re.IGNORECASE)
-    text = re.sub(r'</p>', '\n\n', text, flags=re.IGNORECASE)
-    text = re.sub(r'</div>', '\n', text, flags=re.IGNORECASE)
-    text = re.sub(r'</li>', '\n', text, flags=re.IGNORECASE)
-    text = re.sub(r'</h[1-6]>', '\n\n', text, flags=re.IGNORECASE)
-    text = re.sub(r'<[^>]+>', '', text)
-    text = html_module.unescape(text)
-    text = re.sub(r'\n{3,}', '\n\n', text)
-    return text.strip()
-
-
 # ── Prompt builder ────────────────────────────────────────────────────────────
 
 def _build_user_message(
     body: AnalyzeRequest,
     previous_analysis: PageAnalysis | None,
     analysis_settings: AnalysisSettings | None = None,
+    dismissed: list[dict] | None = None,
 ) -> str:
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     stale_days = analysis_settings.stale_threshold_days if analysis_settings else 180
@@ -331,12 +379,24 @@ def _build_user_message(
         page_info += f"\nCurrent Version: v{body.page_version}"
 
     if body.content:
-        plain_content = _strip_html_for_analysis(body.content)
+        plain_content = _html_to_wiki(body.content)
         page_info += f"\n\nPage Content:\n{plain_content}"
     else:
         page_info += "\n\nNote: No page content was available. Analyze based on metadata only."
 
     msg = f"Please analyze this Confluence page:\n\n{page_info}"
+
+    # Attach user-dismissed issues so Claude never re-raises them
+    if dismissed:
+        msg += "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        msg += "\nUSER-DISMISSED ISSUES — DO NOT REPORT THESE AGAIN:"
+        msg += "\nThe user has reviewed each item below and confirmed it is correct or not an issue."
+        msg += "\nYou must not raise any issue that matches one of these by title or by its exact content.\n"
+        for d in dismissed:
+            msg += f"\n• Title: {d['issue_title']}"
+            if d.get("exact_content"):
+                msg += f"\n  Content: {d['exact_content']}"
+        msg += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
     # Attach fix-awareness context if a previous analysis exists at an older version
     if previous_analysis and previous_analysis.issues:
@@ -522,9 +582,20 @@ async def analyze_page(
         )
         previous_analysis = prev_result.scalar_one_or_none()
 
+    # ── Load dismissed issues for this page ───────────────────────────────────
+    dismissed_list: list[dict] = []
+    if body.page_id:
+        dismissed_result = await db.execute(
+            select(DismissedIssue).where(DismissedIssue.page_id == body.page_id)
+        )
+        dismissed_list = [
+            {"issue_title": r.issue_title, "exact_content": r.exact_content}
+            for r in dismissed_result.scalars().all()
+        ]
+
     # ── Claude call ───────────────────────────────────────────────────────────
     system_prompt = _build_system_prompt(analysis_settings)
-    user_message = _build_user_message(body, previous_analysis, analysis_settings)
+    user_message = _build_user_message(body, previous_analysis, analysis_settings, dismissed_list)
 
     message = client.messages.create(
         model="claude-sonnet-4-20250514",
@@ -551,7 +622,8 @@ async def analyze_page(
     summary = parsed.get("summary", f"Analysis complete. Found {len(issues)} issue(s).")
 
     # is_healthy: only true when Claude says so AND there are genuinely no issues
-    is_healthy = bool(parsed.get("is_healthy", False)) and len(issues) == 0
+    high_or_medium = [i for i in issues if i.severity in ('high', 'medium')]
+    is_healthy = bool(parsed.get("is_healthy", False)) and len(high_or_medium) == 0
 
     # ── Store in cache ────────────────────────────────────────────────────────
     if body.page_id and body.page_version is not None:
@@ -572,6 +644,8 @@ async def analyze_page(
         page = page_row.scalar_one_or_none()
         if page is not None:
             page.is_healthy = is_healthy
+            if is_healthy:
+                page.health_checked_at = datetime.now(timezone.utc)
 
     return AnalyzeResponse(
         page_title=body.title or "Untitled Page",

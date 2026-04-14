@@ -6,10 +6,12 @@ from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import select
 
 from app.core.config import settings
 from app.db.database import get_db
 from app.models.audit import AuditEntry
+from app.models.page import Page
 from app.models.snapshot import Snapshot
 from app.services.confluence_service import ConfluenceService
 
@@ -217,6 +219,12 @@ async def apply_proposal(
     proposal["status"] = "applied"
     proposal["applied_at"] = datetime.now(timezone.utc).isoformat()
     proposal["applied_by"] = body.applied_by
+
+    # Stamp last_fixed_at on the page record
+    page_row = await db.execute(select(Page).where(Page.id == page_id))
+    page_record = page_row.scalar_one_or_none()
+    if page_record is not None:
+        page_record.last_fixed_at = datetime.now(timezone.utc)
 
     # Upsert audit entry with snapshot link
     stmt = pg_insert(AuditEntry).values(

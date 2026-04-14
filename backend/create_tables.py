@@ -11,9 +11,10 @@ import sys
 async def main() -> None:
     from app.core.config import settings
     from app.db.database import engine, Base
-    import app.models.page      # noqa: F401 — registers Space + Page
-    import app.models.audit     # noqa: F401 — registers AuditEntry
-    import app.models.snapshot  # noqa: F401 — registers Snapshot
+    import app.models.page             # noqa: F401 — registers Space + Page
+    import app.models.audit            # noqa: F401 — registers AuditEntry
+    import app.models.snapshot         # noqa: F401 — registers Snapshot
+    import app.models.dismissed_issue  # noqa: F401 — registers DismissedIssue
 
     print(f"Connecting to: {settings.database_url}")
 
@@ -42,6 +43,8 @@ async def main() -> None:
         ("ALTER TABLE pages ADD COLUMN IF NOT EXISTS content_hash VARCHAR(32)", "pages.content_hash"),
         ("ALTER TABLE pages ADD COLUMN IF NOT EXISTS is_healthy BOOLEAN NOT NULL DEFAULT FALSE", "pages.is_healthy"),
         ("ALTER TABLE pages ADD COLUMN IF NOT EXISTS embedding vector(1024)", "pages.embedding"),
+        ("ALTER TABLE pages ADD COLUMN IF NOT EXISTS last_fixed_at TIMESTAMPTZ", "pages.last_fixed_at"),
+        ("ALTER TABLE pages ADD COLUMN IF NOT EXISTS health_checked_at TIMESTAMPTZ", "pages.health_checked_at"),
     ]
 
     for sql, label in migrations:
