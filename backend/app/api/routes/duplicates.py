@@ -1,6 +1,7 @@
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from typing import Literal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -163,6 +164,38 @@ async def scan_single_page(
 class ProposeMergeRequest(BaseModel):
     page_a_id: str
     page_b_id: str
+
+
+class ProposeDuplicateRequest(BaseModel):
+    page_a_id: str
+    page_b_id: str
+    action: Literal["remove-block", "consolidate-pages"]
+
+
+@router.post("/propose-duplicate")
+async def propose_duplicate(body: ProposeDuplicateRequest, db: AsyncSession = Depends(get_db)):
+    """Creates a structured duplication proposal with Claude-identified duplicate content."""
+    existing = next(
+        (p for p in _proposals.values()
+         if p.get("category") == "duplication"
+         and {p.get("pageA", {}).get("id"), p.get("pageB", {}).get("id")} == {body.page_a_id, body.page_b_id}
+         and p.get("action") == body.action),
+        None,
+    )
+    if existing:
+        return {"proposal": existing, "already_exists": True}
+
+    try:
+        proposal = await _duplicate_svc.generate_duplicate_proposal(
+            body.page_a_id, body.page_b_id, body.action, db
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Proposal generation failed: {exc}")
+
+    _proposals[proposal["id"]] = proposal
+    return {"proposal": proposal, "already_exists": False}
 
 
 @router.post("/propose-merge")

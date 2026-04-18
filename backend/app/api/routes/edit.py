@@ -357,6 +357,7 @@ async def generate_edit(body: GenerateEditRequest):
 
     proposal = {
         "id": proposal_id,
+        "category": "analysis",
         "action": action,
         "action_label": EDIT_TYPE_LABELS[body.edit_type],
         "source_page_id": body.page_id,

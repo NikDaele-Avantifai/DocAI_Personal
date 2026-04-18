@@ -14,6 +14,7 @@ export type PageNode = {
   last_modified: string | null
   owner: string | null
   version: number
+  is_folder: boolean
   is_healthy: boolean
   last_fixed_at: string | null
   health_checked_at: string | null
@@ -62,22 +63,27 @@ function PageTreeItem({
 }) {
   const [expanded, setExpanded] = useState(depth === 0)
   const hasChildren = page.children.length > 0
+  const isFolder = page.is_folder || hasChildren  // is_folder from DB or inferred from children
   const flags = sweepFlags?.[page.id] ?? []
   const hasSweepAlert = flags.length > 0 && !dismissedSweep.has(page.id)
 
-  // Indicator: DB is source of truth (persists across refreshes)
-  // Session result overrides only for immediate feedback within the current session
-  type Indicator = "healthy" | "healthy-stale" | "issues" | "grey"
+  // Indicator: DB is source of truth (persists across refreshes).
+  // session result provides immediate feedback after an in-session analysis.
+  // Never-analyzed pages (no health_checked_at, no session result) show nothing.
+  type Indicator = "healthy" | "healthy-stale" | "issues" | "none"
   let indicator: Indicator
   const sessionResult = analysisHealth?.[page.id]
-  if (sessionResult === true || (page.is_healthy && page.health_checked_at)) {
+  const isHealthy = sessionResult !== undefined
+    ? sessionResult
+    : page.health_checked_at != null ? page.is_healthy : null
+  if (isHealthy === null) {
+    indicator = "none"
+  } else if (isHealthy) {
     const checkedAt = page.health_checked_at ? new Date(page.health_checked_at).getTime() : Date.now()
     const daysSince = (Date.now() - checkedAt) / 86_400_000
     indicator = daysSince <= HEALTH_STALE_DAYS ? "healthy" : "healthy-stale"
-  } else if (sessionResult === false || (!page.is_healthy && page.has_been_analyzed)) {
-    indicator = "issues"
   } else {
-    indicator = "grey"
+    indicator = "issues"
   }
 
   return (
@@ -88,19 +94,19 @@ function PageTreeItem({
         onClick={() => { onSelect(page); if (hasSweepAlert) onDismissSweep(page.id) }}>
 
         <span
-          className={`tree-chevron${hasChildren ? "" : " invisible"}`}
+          className={`tree-chevron${(hasChildren || isFolder) ? "" : " invisible"}`}
           onClick={e => {
-            if (!hasChildren) return
+            if (!hasChildren && !isFolder) return
             e.stopPropagation()
             setExpanded(v => !v)
           }}>
           {expanded ? "▾" : "▸"}
         </span>
 
-        <span className="tree-page-icon">{hasChildren ? "⊟" : "◫"}</span>
+        <span className="tree-page-icon">{isFolder ? "⊟" : "◫"}</span>
         <span className="tree-page-title">{page.title}</span>
 
-        {!hasChildren && hasSweepAlert && (
+        {!isFolder && hasSweepAlert && (
           <span
             className="tree-sweep-alert"
             title={`Sweep found ${flags.length} flag${flags.length > 1 ? "s" : ""} — click to dismiss`}
@@ -109,20 +115,17 @@ function PageTreeItem({
           </span>
         )}
 
-        {!hasChildren && indicator === "healthy" && (
+        {!isFolder && indicator === "healthy" && (
           <span className="tree-issue-dot tree-issue-dot-green" title="No issues — page is healthy" />
         )}
-        {!hasChildren && indicator === "healthy-stale" && (
+        {!isFolder && indicator === "healthy-stale" && (
           <span className="tree-issue-dot tree-issue-dot-yellow" title={`Last verified healthy ${Math.floor((Date.now() - new Date(page.health_checked_at!).getTime()) / 2_592_000_000)} months ago — consider re-analyzing`}>⚠</span>
         )}
-        {!hasChildren && indicator === "issues" && (
+        {!isFolder && indicator === "issues" && (
           <span className="tree-issue-dot tree-issue-dot-amber" title="Has open issues from latest analysis" />
         )}
-        {!hasChildren && indicator === "grey" && (
-          <span className="tree-issue-dot tree-issue-dot-grey" title="Never analyzed" />
-        )}
 
-        {hasChildren && (
+        {isFolder && (
           <span className="tree-count">{page.children.length}</span>
         )}
       </div>

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
+import { AlertCircle, CheckCircle2, Folder } from "lucide-react"
 import { SkeletonRow } from "../components/Skeleton"
 import { useTour } from "../contexts/TourContext"
 import "./OverviewPage.css"
@@ -16,6 +17,7 @@ type AtRiskPage = {
   word_count: number
   last_modified: string | null
   is_healthy: boolean
+  is_folder?: boolean
 }
 
 type SweepResult = {
@@ -180,6 +182,33 @@ export default function OverviewPage() {
   const scoreLabel = score >= 80 ? "Healthy" : score >= 50 ? "Needs attention" : "Critical"
   const hasAtRisk = sweep && sweep.pages_at_risk > 0
 
+  // Banner acknowledgement: mark seen after 2s; re-animates only on new sweep
+  const [bannerAcknowledged, setBannerAcknowledged] = useState(() => {
+    try {
+      const ack = localStorage.getItem("docai_banner_ack")
+      const sweepTs = sweep?.completed_at ?? null
+      return !!ack && (!sweepTs || ack >= sweepTs)
+    } catch { return false }
+  })
+
+  useEffect(() => {
+    if (!sweep?.completed_at || bannerAcknowledged) return
+    const timer = setTimeout(() => {
+      try { localStorage.setItem("docai_banner_ack", sweep.completed_at!) } catch {}
+      setBannerAcknowledged(true)
+    }, 2000)
+    return () => clearTimeout(timer)
+  }, [sweep?.completed_at, bannerAcknowledged])
+
+  // Re-check acknowledgement when a new sweep result arrives
+  useEffect(() => {
+    if (!sweep?.completed_at) return
+    try {
+      const ack = localStorage.getItem("docai_banner_ack")
+      setBannerAcknowledged(!!ack && ack >= sweep.completed_at)
+    } catch {}
+  }, [sweep?.completed_at])
+
   const topIssues = sweep
     ? Object.entries(sweep.issue_counts)
         .filter(([, v]) => v > 0)
@@ -222,19 +251,28 @@ export default function OverviewPage() {
         </button>
       </div>
 
-      {/* Alert banner — only when sweep has found problems */}
-      {!loading && hasAtRisk && sweep && (
-        <div className="ov-alert">
+      {/* Alert banner — shown after any sweep; accent color reflects health */}
+      {!loading && sweep && (
+        <div className={`ov-alert${hasAtRisk ? " ov-alert-issues" : " ov-alert-healthy"}${bannerAcknowledged ? " ov-alert-ack" : ""}`}>
           <div className="ov-alert-left">
-            <span className="ov-alert-dot" />
+            {hasAtRisk
+              ? <AlertCircle size={14} color="#D97706" strokeWidth={2} style={{ flexShrink: 0 }} />
+              : <CheckCircle2 size={14} color="#16A34A" strokeWidth={2} style={{ flexShrink: 0 }} />
+            }
             <span className="ov-alert-msg">
-              <strong>{sweep.pages_at_risk} page{sweep.pages_at_risk !== 1 ? "s" : ""} need attention</strong>
-              {topIssues.length > 0 && <span className="ov-alert-detail"> — {topIssues.join(" · ")}</span>}
+              {hasAtRisk
+                ? <><strong>{sweep.pages_at_risk} page{sweep.pages_at_risk !== 1 ? "s" : ""} need attention</strong>
+                    {topIssues.length > 0 && <span className="ov-alert-detail"> — {topIssues.join(" · ")}</span>}</>
+                : <><strong>Workspace is healthy</strong>
+                    <span className="ov-alert-detail"> — {sweep.pages_scanned} pages scanned, no issues found</span></>
+              }
             </span>
           </div>
-          <button className="ov-alert-cta" onClick={() => navigate("/pages")}>
-            Review pages →
-          </button>
+          {hasAtRisk && (
+            <button className="ov-alert-cta" onClick={() => navigate("/pages")}>
+              Review pages →
+            </button>
+          )}
         </div>
       )}
 
@@ -382,34 +420,58 @@ export default function OverviewPage() {
                 <span className="ov-card-badge">{sweep.pages_at_risk}</span>
               </div>
               <div className="ov-risk-list">
-                {sweep.at_risk_pages.slice(0, 8).map(page => (
-                  <div
-                    key={page.id}
-                    className="ov-risk-row"
-                    onClick={() => navigate("/pages")}>
-                    <div className="ov-risk-left">
-                      <div className="ov-risk-title">{page.title}</div>
-                      <div className="ov-risk-meta">
-                        {page.space_key && !/^~|^[0-9a-f]{8,}$/i.test(page.space_key) && (
-                          <span className="ov-space-badge">{page.space_key}</span>
-                        )}
-                        {page.word_count < 50 && (
-                          <span className="ov-risk-words">{page.word_count} words</span>
-                        )}
+                {sweep.at_risk_pages.slice(0, 8).map(page => {
+                  const isFolder = page.is_folder ?? false
+                  const isEmpty = !isFolder && page.flags.includes("empty")
+                  const visibleFlags = page.flags.filter(f =>
+                    isFolder ? f === "generic_title" : true
+                  )
+                  return (
+                    <div
+                      key={page.id}
+                      className="ov-risk-row"
+                      onClick={() => navigate("/pages")}>
+                      <div className="ov-risk-left">
+                        <div className="ov-risk-title">
+                          {isFolder && (
+                            <Folder size={13} color="var(--text-3)" style={{ flexShrink: 0, marginRight: 5, verticalAlign: "middle" }} />
+                          )}
+                          {page.title}
+                        </div>
+                        <div className="ov-risk-meta">
+                          {page.space_key && !/^~|^[0-9a-f]{8,}$/i.test(page.space_key) && (
+                            <span className="ov-space-badge">{page.space_key}</span>
+                          )}
+                          {isFolder ? (
+                            <span
+                              className="ov-risk-folder-badge"
+                              title="Structural container — rename via Batch Rename">
+                              FOLDER
+                            </span>
+                          ) : isEmpty ? (
+                            <span
+                              className="ov-risk-words"
+                              title="This page has no content. Add content in Confluence to enable AI analysis.">
+                              {page.word_count} words
+                            </span>
+                          ) : page.word_count < 50 ? (
+                            <span className="ov-risk-words">{page.word_count} words</span>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="ov-risk-flags">
+                        {visibleFlags.slice(0, 3).map(f => (
+                          <span
+                            key={f}
+                            className="ov-flag"
+                            style={{ color: ISSUE_META[f]?.color, background: ISSUE_META[f]?.bg }}>
+                            {FLAG_SHORT[f] ?? f}
+                          </span>
+                        ))}
                       </div>
                     </div>
-                    <div className="ov-risk-flags">
-                      {page.flags.slice(0, 3).map(f => (
-                        <span
-                          key={f}
-                          className="ov-flag"
-                          style={{ color: ISSUE_META[f]?.color, background: ISSUE_META[f]?.bg }}>
-                          {FLAG_SHORT[f] ?? f}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}

@@ -1,28 +1,68 @@
 /* ═══════════════════════════════════════════════════════════
-   Design Tokens — DocAI B2B SaaS
+   Design Tokens — DocAI Brand System
    ═══════════════════════════════════════════════════════════ */
 
 :root {
 
-  /* ── Colors ─────────────────────────────────────────────── */
+  /* ── Brand ───────────────────────────────────────────── */
 
-  --color-primary:        rgb(37, 99, 235);
-  --color-primary-hover:  rgb(29, 78, 216);
-  --color-primary-subtle: rgba(37, 99, 235, 0.08);
-  --color-text-link:      rgb(37, 99, 235);
+  --brand-steel:     #87BAD0;
+  --brand-ice:       #C2DCEB;
+  --brand-navy:      #1A2E44;
+  --brand-black:     #020B18;
 
-  --color-bg-app:     #f8f9fa;
-  --color-bg-sidebar: #ffffff;
-  --color-bg-card:    #ffffff;
+  /* ── Backgrounds ─────────────────────────────────────── */
 
-  --color-border:       rgba(0, 0, 0, 0.08);
-  --color-border-strong: rgba(0, 0, 0, 0.15);
+  --bg-app:          #F7F9FB;
+  --bg-white:        #FFFFFF;
+  --bg-sidebar:      #FFFFFF;
+  --bg-card:         #FFFFFF;
+  --bg-hover:        rgba(135, 186, 208, 0.08);
+  --bg-active:       rgba(135, 186, 208, 0.14);
 
-  --color-text-primary:   #111827;
-  --color-text-secondary: #6b7280;
-  --color-text-muted:     #9ca3af;
+  /* ── Borders ─────────────────────────────────────────── */
 
-  /* ── Spacing (4px base scale) ───────────────────────────── */
+  --border:          rgba(26, 46, 68, 0.10);
+  --border-2:        rgba(26, 46, 68, 0.18);
+
+  /* ── Text ────────────────────────────────────────────── */
+
+  --text-1:          #0D1B2A;
+  --text-2:          #3D5166;
+  --text-3:          #7A96AE;
+  --text-4:          #A8BFCC;
+
+  /* ── Accent ──────────────────────────────────────────── */
+
+  --accent:          #1A2E44;
+  --accent-hover:    #243d58;
+  --accent-light:    rgba(135, 186, 208, 0.12);
+  --accent-border:   rgba(135, 186, 208, 0.35);
+
+  /* ── Semantic ────────────────────────────────────────── */
+
+  --green:           #16A34A;
+  --green-bg:        rgba(22, 163, 74, 0.08);
+  --green-text:      #15803D;
+  --amber-bg:        rgba(217, 119, 6, 0.09);
+  --amber-text:      #B45309;
+  --red-bg:          rgba(220, 38, 38, 0.08);
+  --red-text:        #DC2626;
+  --blue-text:       #1A2E44;
+  --blue-bg:         rgba(135, 186, 208, 0.12);
+
+  /* ── Shadows ─────────────────────────────────────────── */
+
+  --shadow-sm:       0 1px 3px rgba(26, 46, 68, 0.08);
+  --shadow-md:       0 4px 12px rgba(26, 46, 68, 0.10);
+  --shadow-lg:       0 8px 24px rgba(26, 46, 68, 0.14);
+
+  /* ── Surface ─────────────────────────────────────────── */
+
+  --surface-2:       #F0F5F8;
+  --surface-3:       #E4EDF3;
+
+  /* ── Spacing (4px base scale) ───────────────────────── */
 
   --space-1:   4px;
   --space-2:   8px;
@@ -36,12 +76,8 @@
   --space-10:  56px;
   --space-11:  64px;
   --space-12:  80px;
-  --space-13:  96px;
-  --space-14:  112px;
-  --space-15:  128px;
-  --space-16:  160px;
 
-  /* ── Border Radius ──────────────────────────────────────── */
+  /* ── Border Radius ──────────────────────────────────── */
 
   --radius-sm:   4px;
   --radius-md:   6px;
@@ -49,7 +85,7 @@
   --radius-xl:   12px;
   --radius-full: 9999px;
 
-  /* ── Font Sizes ─────────────────────────────────────────── */
+  /* ── Font Sizes ─────────────────────────────────────── */
 
   --text-xs:   11px;
   --text-sm:   13px;
@@ -59,21 +95,30 @@
   --text-xl:   22px;
   --text-2xl:  28px;
 
-  /* ── Font Weights ───────────────────────────────────────── */
+  /* ── Font Weights ───────────────────────────────────── */
 
   --font-normal:   400;
   --font-medium:   500;
   --font-semibold: 600;
 
-  /* ── Shadows ────────────────────────────────────────────── */
-
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
-
-  /* ── Transitions ────────────────────────────────────────── */
+  /* ── Transitions ────────────────────────────────────── */
 
   --transition-fast: 120ms ease;
   --transition-base: 200ms ease;
+
+  /* ── Legacy aliases (for backward compat) ───────────── */
+
+  --color-primary:        #1A2E44;
+  --color-primary-hover:  #243d58;
+  --color-primary-subtle: rgba(135, 186, 208, 0.12);
+  --color-text-link:      #1A2E44;
+  --color-bg-app:         #F7F9FB;
+  --color-bg-sidebar:     #FFFFFF;
+  --color-bg-card:        #FFFFFF;
+  --color-border:         rgba(26, 46, 68, 0.10);
+  --color-border-strong:  rgba(26, 46, 68, 0.18);
+  --color-text-primary:   #0D1B2A;
+  --color-text-secondary: #3D5166;
+  --color-text-muted:     #7A96AE;
 
 }

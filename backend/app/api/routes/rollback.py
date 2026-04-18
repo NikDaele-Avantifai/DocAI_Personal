@@ -47,23 +47,56 @@ async def rollback_change(
     )
 
     try:
-        current = await svc.get_page(snapshot.page_id)
-        current_version = current.get("version", {}).get("number", 1)
+        if snapshot.action == "rename":
+            # Restore old title via v2 API
+            await svc.rename_page_v2(snapshot.page_id, snapshot.page_title_before)
 
-        # For renames the body was untouched — restore original title, keep current body
-        # For content edits — restore original title + original body
-        if snapshot.page_body_before is None:
-            restore_body = current.get("body", {}).get("storage", {}).get("value", "")
+        elif snapshot.action == "consolidate-pages":
+            # Page is in Confluence trash — normal get_page 404s.
+            # Fetch via ?status=trashed to get the current version and space key.
+            import httpx as _httpx
+            async with _httpx.AsyncClient(timeout=20.0) as _client:
+                trashed_resp = await _client.get(
+                    f"{settings.atlassian_base_url.rstrip('/')}/wiki/rest/api/content/{snapshot.page_id}",
+                    auth=(settings.atlassian_mail, settings.atlassian_api_token),
+                    params={"status": "trashed", "expand": "version,space"},
+                    headers={"Accept": "application/json"},
+                )
+            if not trashed_resp.is_success:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Could not fetch trashed page {snapshot.page_id}: {trashed_resp.status_code} {trashed_resp.text[:200]}",
+                )
+            trashed_data = trashed_resp.json()
+            current_version = trashed_data.get("version", {}).get("number", snapshot.page_version_before)
+            space_key = trashed_data.get("space", {}).get("key", "")
+
+            restore_body = snapshot.page_body_before or ""
+            await svc.restore_page(
+                page_id=snapshot.page_id,
+                title=snapshot.page_title_before,
+                body=restore_body,
+                version=current_version,
+                space_key=space_key,
+            )
         else:
-            restore_body = snapshot.page_body_before
+            current = await svc.get_page(snapshot.page_id)
+            current_version = current.get("version", {}).get("number", 1)
 
-        await svc.update_page(
-            page_id=snapshot.page_id,
-            title=snapshot.page_title_before,
-            body=restore_body,
-            current_version=current_version,
-            representation="storage",
-        )
+            # For renames the body was untouched — restore original title, keep current body
+            # For content edits — restore original title + original body
+            if snapshot.page_body_before is None:
+                restore_body = current.get("body", {}).get("storage", {}).get("value", "")
+            else:
+                restore_body = snapshot.page_body_before
+
+            await svc.update_page(
+                page_id=snapshot.page_id,
+                title=snapshot.page_title_before,
+                body=restore_body,
+                current_version=current_version,
+                representation="storage",
+            )
     except HTTPException:
         raise
     except Exception as exc:

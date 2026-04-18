@@ -1,7 +1,7 @@
 import re
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
@@ -12,24 +12,46 @@ from app.models.sweep import WorkspaceSweep
 router = APIRouter()
 
 GENERIC_TITLE_RE = re.compile(
-    r"^(meeting notes?|untitled|draft|new page|home|welcome|todo|temp|test|page \d+|notes?|overview)$",
+    r"^(meeting notes?|untitled|draft|new page|home|welcome|todo|temp|test\d*|page \d+|notes?|overview|ddd|[a-z]{1,2}|test file\s*\d*|new file|document\s*\d*)$",
     re.IGNORECASE,
 )
 STALE_DAYS = 180
 MIN_WORD_COUNT = 50
 
+_VALID_SHORT = {"faq", "api", "hr", "qa", "ui", "ux", "db", "crm", "erp"}
 
-def _classify_page(page: Page, has_open_issues: bool) -> list[str]:
+
+def _classify_page(page: Page, has_open_issues: bool, ai_healthy: bool = False) -> list[str]:
     """Return a list of issue flags for a page using fast heuristics."""
     flags: list[str] = []
+    title_stripped = (page.title or "").strip()
 
-    if not page.content or page.word_count < MIN_WORD_COUNT:
+    # ── FOLDER: structural container, no content expected ──────────────────────
+    if page.is_folder:
+        # Only flag folders for bad naming — never for empty content, owner, or staleness
+        if len(title_stripped) < 3 and title_stripped.lower() not in _VALID_SHORT:
+            flags.append("generic_title")
+        elif GENERIC_TITLE_RE.match(title_stripped):
+            flags.append("generic_title")
+        return flags
+
+    # ── EMPTY PAGE: real page with no/minimal content ──────────────────────────
+    if not page.content or (page.word_count or 0) < MIN_WORD_COUNT:
         flags.append("empty")
+        # Still check title on empty pages, but skip stale/owner checks
+        if len(title_stripped) < 3 and title_stripped.lower() not in _VALID_SHORT:
+            flags.append("generic_title")
+        elif GENERIC_TITLE_RE.match(title_stripped):
+            flags.append("generic_title")
+        return flags
 
+    # ── NORMAL PAGE: has content, run all checks ───────────────────────────────
     if not page.owner:
         flags.append("no_owner")
 
-    if GENERIC_TITLE_RE.match(page.title.strip()):
+    if len(title_stripped) < 3 and title_stripped.lower() not in _VALID_SHORT:
+        flags.append("generic_title")
+    elif GENERIC_TITLE_RE.match(title_stripped):
         flags.append("generic_title")
 
     if page.last_modified:
@@ -41,7 +63,7 @@ def _classify_page(page: Page, has_open_issues: bool) -> list[str]:
         except (ValueError, AttributeError):
             pass
 
-    if has_open_issues:
+    if has_open_issues and not ai_healthy:
         flags.append("needs_review")
 
     return flags
@@ -55,15 +77,34 @@ async def run_sweep(db: AsyncSession = Depends(get_db)):
     """
     pages = (await db.execute(select(Page))).scalars().all()
 
-    # Pages that have at least one open issue from a prior AI analysis
-    analyses = (await db.execute(select(PageAnalysis))).scalars().all()
+    # Subquery: latest analysis timestamp per page
+    latest_subq = (
+        select(PageAnalysis.page_id, func.max(PageAnalysis.analyzed_at).label("max_at"))
+        .group_by(PageAnalysis.page_id)
+        .subquery()
+    )
+
+    # Join to get only the latest analysis row per page
+    latest_analyses = (await db.execute(
+        select(PageAnalysis)
+        .join(
+            latest_subq,
+            (PageAnalysis.page_id == latest_subq.c.page_id) &
+            (PageAnalysis.analyzed_at == latest_subq.c.max_at),
+        )
+    )).scalars().all()
+
     pages_with_issues: set[str] = {
         a.page_id
-        for a in analyses
-        if a.issues and (
-            (isinstance(a.issues, list) and len(a.issues) > 0)
-            or (isinstance(a.issues, dict) and len(a.issues.get("issues", [])) > 0)
-        )
+        for a in latest_analyses
+        if not a.is_healthy and a.issues and len(a.issues) > 0
+    }
+
+    # Pages the AI explicitly marked healthy — suppress needs_review for these
+    pages_ai_healthy: set[str] = {
+        a.page_id
+        for a in latest_analyses
+        if a.is_healthy
     }
 
     issue_counts: dict[str, int] = {
@@ -77,7 +118,11 @@ async def run_sweep(db: AsyncSession = Depends(get_db)):
     healthy_count = 0
 
     for page in pages:
-        flags = _classify_page(page, page.id in pages_with_issues)
+        flags = _classify_page(
+            page,
+            has_open_issues=page.id in pages_with_issues,
+            ai_healthy=page.id in pages_ai_healthy,
+        )
         if flags:
             for f in flags:
                 if f in issue_counts:
@@ -90,6 +135,8 @@ async def run_sweep(db: AsyncSession = Depends(get_db)):
                 "word_count": page.word_count,
                 "last_modified": page.last_modified,
                 "is_healthy": page.is_healthy,
+                "is_folder": bool(page.is_folder),
+                "ai_analyzed": page.id in pages_ai_healthy or page.id in pages_with_issues,
             })
         else:
             healthy_count += 1

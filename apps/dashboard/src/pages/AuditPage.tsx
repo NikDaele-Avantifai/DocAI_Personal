@@ -165,9 +165,9 @@ export default function AuditPage() {
             {groups[group].map(entry => {
               const style = ACTION_STYLE[entry.action] ?? ACTION_STYLE.add_summary
               const actor = entry.applied_by ?? entry.reviewed_by ?? "DocAI"
-              const canRollback = entry.decision === "applied" && entry.snapshot_id
-              const isConfirming = confirmId === entry.snapshot_id
-              const isRollingBack = rollingBack === entry.snapshot_id
+              const canRollback = entry.decision === "applied" && !!entry.snapshot_id
+              const isConfirming = !!entry.snapshot_id && confirmId === entry.snapshot_id
+              const isRollingBack = !!entry.snapshot_id && rollingBack === entry.snapshot_id
 
               return (
                 <div key={entry.id} className="audit-entry">

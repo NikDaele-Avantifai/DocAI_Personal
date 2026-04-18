@@ -129,6 +129,12 @@ class ConfluenceService:
                     headers={"Accept": "application/json"},
                 )
                 if not resp.is_success:
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "_fetch_folders_v2: v2 folders endpoint returned %s for space_id=%s — "
+                        "folders will be picked up via _fill_missing_parents instead",
+                        resp.status_code, space_id,
+                    )
                     break  # v2 folders not available on this instance
 
                 data = resp.json()
@@ -226,6 +232,37 @@ class ConfluenceService:
             representation="storage",
         )
 
+    async def rename_page_v2(self, page_id: str, new_title: str) -> dict[str, Any]:
+        """
+        Rename a page using the Confluence v2 API.
+        Fetches the current version first, then PUTs the new title with version+1.
+        """
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            get_resp = await client.get(
+                f"{self.base_url}/wiki/api/v2/pages/{page_id}",
+                auth=self._auth,
+                headers={"Accept": "application/json"},
+            )
+            get_resp.raise_for_status()
+            current_version = get_resp.json().get("version", {}).get("number", 1)
+
+            response = await client.put(
+                f"{self.base_url}/wiki/api/v2/pages/{page_id}",
+                auth=self._auth,
+                headers={"Content-Type": "application/json", "Accept": "application/json"},
+                json={
+                    "id": page_id,
+                    "status": "current",
+                    "title": new_title,
+                    "version": {
+                        "number": current_version + 1,
+                        "message": "Renamed by DocAI",
+                    },
+                },
+            )
+            response.raise_for_status()
+            return response.json()
+
     async def archive_page(self, page_id: str) -> bool:
         """Move a page to the archive by updating its status."""
         async with httpx.AsyncClient() as client:
@@ -234,3 +271,43 @@ class ConfluenceService:
                 auth=self._auth,
             )
             return response.status_code == 204
+
+    async def restore_page(
+        self,
+        page_id: str,
+        title: str,
+        body: str,
+        version: int,
+        space_key: str,
+    ) -> dict[str, Any]:
+        """Restore a trashed page back to current status.
+
+        Confluence moves deleted pages to trash (status='trashed'). Both the GET
+        and the PUT must include ?status=trashed — without it, Confluence looks
+        for a 'current' page, finds nothing, and returns 404.
+        """
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            # PUT needs ?status=trashed so Confluence targets the trashed copy.
+            # The caller is expected to pass the current trashed version number.
+            response = await client.put(
+                f"{self.base_url}/wiki/rest/api/content/{page_id}",
+                auth=self._auth,
+                params={"status": "trashed"},
+                headers={"Content-Type": "application/json", "Accept": "application/json"},
+                json={
+                    "id": page_id,
+                    "type": "page",
+                    "status": "current",
+                    "title": title,
+                    "version": {"number": version + 1},
+                    "space": {"key": space_key},
+                    "body": {
+                        "storage": {
+                            "value": body,
+                            "representation": "storage",
+                        }
+                    },
+                },
+            )
+            response.raise_for_status()
+            return response.json()

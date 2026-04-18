@@ -154,12 +154,17 @@ class SyncService:
             webui_page = links.get("webui", "")
             page_url = f"{self.confluence.base_url}/wiki{webui_page}" if webui_page else None
 
+            # Detect folders from both sources:
+            # - _is_folder=True: set by _fetch_folders_v2 (v2 API)
+            # - type="folder": returned by v1 API when fetching a folder by ID
+            is_folder = bool(rp.get("_is_folder", False)) or rp.get("type") == "folder"
             stmt = pg_insert(Page).values(
                 id=page_id,
                 title=rp.get("title", "Untitled"),
                 space_key=space_key,
                 parent_id=_extract_parent_id(rp),
                 word_count=0,
+                is_folder=is_folder,
                 last_modified=_extract_last_modified(rp),
                 owner=_extract_owner(rp),
                 url=page_url,
@@ -172,6 +177,7 @@ class SyncService:
                     "title": rp.get("title", "Untitled"),
                     "space_key": space_key,
                     "parent_id": _extract_parent_id(rp),
+                    "is_folder": is_folder,
                     "last_modified": _extract_last_modified(rp),
                     "owner": _extract_owner(rp),
                     "url": page_url,
@@ -282,6 +288,7 @@ class SyncService:
                 "last_modified": p.last_modified,
                 "owner": p.owner,
                 "version": p.version,
+                "is_folder": bool(p.is_folder),
                 "is_healthy": getattr(p, "is_healthy", False),
                 "last_fixed_at": getattr(p, "last_fixed_at", None),
                 "health_checked_at": getattr(p, "health_checked_at", None),
@@ -307,6 +314,12 @@ class SyncService:
             content = raw.get("body", {}).get("storage", {}).get("value", "")
             word_count = len(content.split())
 
+            # Preserve is_folder — fetch current value before upserting
+            existing_is_folder = (await self.session.execute(
+                select(Page.is_folder).where(Page.id == page_id)
+            )).scalar_one_or_none()
+            current_is_folder = existing_is_folder if existing_is_folder is not None else False
+
             # Update DB with content
             stmt = pg_insert(Page).values(
                 id=page_id,
@@ -315,6 +328,7 @@ class SyncService:
                 parent_id=_extract_parent_id(raw),
                 content=content,
                 word_count=word_count,
+                is_folder=current_is_folder,
                 last_modified=_extract_last_modified(raw),
                 owner=_extract_owner(raw),
                 url=(
@@ -331,6 +345,7 @@ class SyncService:
                     "title": raw.get("title", "Untitled"),
                     "content": content,
                     "word_count": word_count,
+                    "is_folder": current_is_folder,
                     "version": raw.get("version", {}).get("number", 1),
                     "last_modified": _extract_last_modified(raw),
                     "owner": _extract_owner(raw),

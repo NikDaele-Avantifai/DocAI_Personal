@@ -299,6 +299,84 @@ function ProposeOptions({
   )
 }
 
+// ── DecisionPanel ─────────────────────────────────────────────────────────────
+
+function DecisionPanel({
+  isProposing,
+  onSelect,
+  onClose,
+}: {
+  isProposing: boolean
+  onSelect: (action: "remove-block" | "consolidate-pages") => void
+  onClose: () => void
+}) {
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose()
+    }
+    function handleMouseDown(e: MouseEvent) {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+        onClose()
+      }
+    }
+    document.addEventListener("keydown", handleKey)
+    document.addEventListener("mousedown", handleMouseDown)
+    return () => {
+      document.removeEventListener("keydown", handleKey)
+      document.removeEventListener("mousedown", handleMouseDown)
+    }
+  }, [onClose])
+
+  return (
+    <div className="dup-decision-panel" ref={panelRef}>
+      <div className="dup-decision-title">How would you like to resolve this?</div>
+      <div className="dup-decision-options">
+
+        <div className="dup-decision-option">
+          <div className="dup-decision-option-body">
+            <div className="dup-decision-icon">✂</div>
+            <div>
+              <div className="dup-decision-option-name">Remove duplicate section</div>
+              <div className="dup-decision-option-desc">
+                Remove the duplicate content from one page and keep it in the other.
+                Best when only part of the page overlaps.
+              </div>
+            </div>
+          </div>
+          <button
+            className={`btn-decision-select${isProposing ? " loading" : ""}`}
+            onClick={() => onSelect("remove-block")}
+            disabled={isProposing}>
+            {isProposing ? <><span className="spinner-sm" /> Working…</> : "Select"}
+          </button>
+        </div>
+
+        <div className="dup-decision-option">
+          <div className="dup-decision-option-body">
+            <div className="dup-decision-icon">⑂</div>
+            <div>
+              <div className="dup-decision-option-name">Consolidate into one page</div>
+              <div className="dup-decision-option-desc">
+                Remove one page entirely and merge its unique content into the other.
+                Best when pages are heavily overlapping.
+              </div>
+            </div>
+          </div>
+          <button
+            className={`btn-decision-select${isProposing ? " loading" : ""}`}
+            onClick={() => onSelect("consolidate-pages")}
+            disabled={isProposing}>
+            {isProposing ? <><span className="spinner-sm" /> Working…</> : "Select"}
+          </button>
+        </div>
+
+      </div>
+    </div>
+  )
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function DuplicatesPage() {
@@ -324,6 +402,7 @@ export default function DuplicatesPage() {
   const [proposing, setProposing] = useState<string | null>(null)
   const [proposed, setProposed]   = useState<Set<string>>(new Set())
   const [proposeError, setProposeError] = useState<string | null>(null)
+  const [decisionPanelPair, setDecisionPanelPair] = useState<string | null>(null)
 
   // Why similar? panel state
   const [expandedPairs, setExpandedPairs] = useState<Set<string>>(new Set())
@@ -442,6 +521,33 @@ export default function DuplicatesPage() {
       setProposed(prev => new Set(prev).add(key))
     } catch (e) {
       setProposeError(e instanceof Error ? e.message : "Failed to propose merge")
+    } finally {
+      setProposing(null)
+    }
+  }
+
+  async function proposeDuplicate(pair: DuplicatePair, action: "remove-block" | "consolidate-pages") {
+    const key = pairKey(pair)
+    setProposing(key)
+    setProposeError(null)
+    setDecisionPanelPair(null)
+    try {
+      const res = await fetch(`${API_BASE}/api/duplicates/propose-duplicate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          page_a_id: pair.page_a.id,
+          page_b_id: pair.page_b.id,
+          action,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail ?? `API error ${res.status}`)
+      }
+      setProposed(prev => new Set(prev).add(key))
+    } catch (e) {
+      setProposeError(e instanceof Error ? e.message : "Failed to create proposal")
     } finally {
       setProposing(null)
     }
@@ -751,10 +857,19 @@ export default function DuplicatesPage() {
                     <ProposeOptions
                       isProposing={isProposing}
                       onArchive={() => proposeMerge(pair, "archive")}
-                      onRewrite={() => proposeMerge(pair, "rewrite")}
+                      onRewrite={() => setDecisionPanelPair(key)}
                     />
                   )}
                 </div>
+
+                {/* Inline decision panel */}
+                {decisionPanelPair === key && !isDone && (
+                  <DecisionPanel
+                    isProposing={isProposing}
+                    onSelect={(action) => proposeDuplicate(pair, action)}
+                    onClose={() => setDecisionPanelPair(null)}
+                  />
+                )}
               </div>
             )
           })}
@@ -828,11 +943,17 @@ export default function DuplicatesPage() {
                       Review in Proposals ↗
                     </button>
                   </div>
+                ) : decisionPanelPair === fKey ? (
+                  <DecisionPanel
+                    isProposing={isProposing}
+                    onSelect={(action) => { proposeDuplicate(fullViewPair, action); setFullViewPair(null) }}
+                    onClose={() => setDecisionPanelPair(null)}
+                  />
                 ) : (
                   <ProposeOptions
                     isProposing={isProposing}
                     onArchive={() => proposeMerge(fullViewPair, "archive")}
-                    onRewrite={() => proposeMerge(fullViewPair, "rewrite")}
+                    onRewrite={() => setDecisionPanelPair(fKey)}
                   />
                 )}
               </div>

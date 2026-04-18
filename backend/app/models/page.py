@@ -37,6 +37,7 @@ class Page(Base):
     url: Mapped[str | None] = mapped_column(String, nullable=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     content_hash: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    is_folder: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     is_healthy: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     last_fixed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     health_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

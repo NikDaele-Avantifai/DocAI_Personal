@@ -228,6 +228,7 @@ Analyse both pages and return ONLY a JSON object with these exact keys (no markd
         proposal_id = str(uuid.uuid4())
         return {
             "id": proposal_id,
+            "category": "duplication",
             "action": "merge",
             "source_page_id": secondary_page.id,
             "source_page_title": secondary_page.title,
@@ -245,4 +246,98 @@ Analyse both pages and return ONLY a JSON object with these exact keys (no markd
             "reviewed_at": None,
             "reviewed_by": None,
             "applied_by": None,
+        }
+
+    async def generate_duplicate_proposal(
+        self,
+        page_a_id: str,
+        page_b_id: str,
+        action: str,  # "remove-block" | "consolidate-pages"
+        db: AsyncSession,
+    ) -> dict[str, Any]:
+        """Creates a structured duplication proposal with Claude-identified duplicate content."""
+        page_a = (await db.execute(select(Page).where(Page.id == page_a_id))).scalar_one_or_none()
+        page_b = (await db.execute(select(Page).where(Page.id == page_b_id))).scalar_one_or_none()
+
+        if page_a is None:
+            raise ValueError(f"Page {page_a_id} not found")
+        if page_b is None:
+            raise ValueError(f"Page {page_b_id} not found")
+
+        client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+
+        action_context = (
+            "The user wants to remove the duplicate block from one page, keeping it only in the other."
+            if action == "remove-block"
+            else "The user wants to consolidate by archiving one page and keeping the other as the canonical source."
+        )
+
+        prompt = f"""You are a documentation expert. Two Confluence pages contain duplicate content.
+
+{action_context}
+
+PAGE A  (id: {page_a.id})
+Title: {page_a.title}
+Content (truncated to 3000 chars):
+{(page_a.content or "")[:3000]}
+
+PAGE B  (id: {page_b.id})
+Title: {page_b.title}
+Content (truncated to 3000 chars):
+{(page_b.content or "")[:3000]}
+
+Identify the overlapping/duplicate content and return ONLY a JSON object (no markdown, no explanation):
+{{
+  "pageA_duplicate_content": "<exact duplicate text excerpt from page A, max 400 chars>",
+  "pageB_duplicate_content": "<exact duplicate text excerpt from page B, max 400 chars>",
+  "recommendation": "keep-pageA" or "keep-pageB",
+  "rationale": "<one sentence: which page to keep and why>"
+}}"""
+
+        msg = await client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        raw = msg.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = raw[raw.index("{"):]
+        if raw.endswith("```"):
+            raw = raw[: raw.rindex("}") + 1]
+
+        try:
+            analysis: dict[str, Any] = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Claude returned invalid JSON: {exc}\nRaw: {raw[:300]}")
+
+        action_label = "Remove duplicate section" if action == "remove-block" else "Consolidate pages"
+        proposal_id = str(uuid.uuid4())
+        return {
+            "id": proposal_id,
+            "category": "duplication",
+            "action": action,
+            "action_label": action_label,
+            "pageA": {
+                "id": page_a.id,
+                "title": page_a.title,
+                "duplicateContent": analysis.get("pageA_duplicate_content", ""),
+            },
+            "pageB": {
+                "id": page_b.id,
+                "title": page_b.title,
+                "duplicateContent": analysis.get("pageB_duplicate_content", ""),
+            },
+            "recommendation": analysis.get("recommendation", "keep-pageA"),
+            "rationale": analysis.get("rationale", "Duplicate content detected"),
+            "status": "pending",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "reviewed_at": None,
+            "reviewed_by": None,
+            "applied_by": None,
+            # Compatibility fields for the proposal list
+            "source_page_id": page_a.id,
+            "source_page_title": page_a.title,
+            "proposed_by": "DocAI",
+            "diff": "[]",
         }

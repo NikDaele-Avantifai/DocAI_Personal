@@ -97,7 +97,10 @@ export default function Layout() {
     setSyncing(true)
     try {
       await fetch(`${API_BASE}/api/sync/spaces`, { method: "POST" })
-      setLastSync(new Date().toISOString())
+      const now = new Date().toISOString()
+      setLastSync(now)
+      // Notify all pages to re-fetch their data without a browser refresh
+      window.dispatchEvent(new CustomEvent("docai:synccomplete"))
     } catch {}
     setSyncing(false)
   }

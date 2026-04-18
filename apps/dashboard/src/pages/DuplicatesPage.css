@@ -18,28 +18,31 @@
 }
 
 .dup-eyebrow {
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
-  color: var(--accent);
+  color: var(--text-3);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-bottom: 6px;
+  font-family: 'Manrope', sans-serif;
 }
 
 .dup-title {
   font-size: 22px;
-  font-weight: 700;
-  color: var(--text-1);
-  margin: 0 0 8px;
-  line-height: 1.2;
+  font-weight: 800;
+  font-family: 'Nunito Sans', sans-serif;
+  color: #0D1B2A;
+  margin: 0 0 6px;
+  line-height: 1.25;
 }
 
 .dup-sub {
-  font-size: 13px;
-  color: var(--text-3);
+  font-size: 14px;
+  font-family: 'Manrope', sans-serif;
+  color: var(--text-2);
   line-height: 1.6;
   margin: 0;
-  max-width: 560px;
+  max-width: 600px;
 }
 
 .dup-header-icon {
@@ -226,40 +229,39 @@
   align-items: center;
   gap: 7px;
   border: none;
-  border-radius: 4px;
-  font-family: inherit;
+  border-radius: 7px;
+  font-family: 'Manrope', sans-serif;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.1s, opacity 0.1s;
+  transition: background 150ms ease;
   white-space: nowrap;
 }
 
 .btn-embed {
-  background: var(--accent);
+  background: #1A2E44;
   color: white;
-  padding: 9px 16px;
-  font-size: 13px;
+  padding: 9px 18px;
+  font-size: 13.5px;
   flex-shrink: 0;
 }
-.btn-embed:hover:not(:disabled) { background: var(--accent-hover); }
+.btn-embed:hover:not(:disabled) { background: #243d58; }
 .btn-embed:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .btn-scan {
-  background: var(--accent);
+  background: #1A2E44;
   color: white;
   padding: 9px 18px;
-  font-size: 13px;
+  font-size: 13.5px;
 }
-.btn-scan:hover:not(:disabled) { background: var(--accent-hover); }
+.btn-scan:hover:not(:disabled) { background: #243d58; }
 .btn-scan:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .btn-propose {
-  background: var(--bg-white);
-  border: 1px solid var(--border);
-  color: var(--text-1);
+  background: white;
+  border: 1px solid var(--border-2);
+  color: var(--text-2);
   padding: 7px 14px;
   font-size: 12.5px;
-  box-shadow: var(--shadow-sm);
 }
 .btn-propose:hover:not(:disabled) { background: var(--surface-2); }
 .btn-propose:disabled { opacity: 0.6; cursor: not-allowed; }
@@ -276,7 +278,7 @@
 }
 
 .btn-propose .spinner-sm {
-  border-color: rgba(9,30,66,0.15);
+  border-color: rgba(26, 46, 68, 0.12);
   border-top-color: var(--text-2);
 }
 
@@ -685,16 +687,14 @@
 }
 
 .btn-embed-ghost {
-  background: transparent;
+  background: white;
   color: var(--text-2);
   border: 1px solid var(--border-2);
-  padding: 9px 14px;
-  font-size: 12.5px;
+  padding: 9px 18px;
+  font-size: 13.5px;
 }
 .btn-embed-ghost:hover:not(:disabled) {
   background: var(--surface-2);
-  border-color: var(--accent);
-  color: var(--accent);
 }
 
 /* ── Step 2 sub spacing ── */
@@ -713,7 +713,7 @@
 }
 
 .spinner-dark {
-  border-color: rgba(9,30,66,0.15);
+  border-color: rgba(26, 46, 68, 0.12);
   border-top-color: var(--text-2);
 }
 
@@ -733,13 +733,13 @@
 }
 
 .btn-propose-primary {
-  background: var(--color-primary, #0052CC);
+  background: #1A2E44;
   color: #fff;
-  border-color: var(--color-primary, #0052CC);
+  border-color: #1A2E44;
 }
 .btn-propose-primary:hover:not(:disabled) {
-  opacity: 0.85;
-  background: var(--color-primary, #0052CC);
+  background: #243d58;
+  border-color: #243d58;
 }
 .btn-propose-primary .spinner-sm {
   border-color: rgba(255,255,255,0.35);
@@ -867,7 +867,7 @@
   font-size: 12.5px;
   font-weight: 500;
   font-family: inherit;
-  color: var(--color-text-link, #0052CC);
+  color: var(--accent);
   padding: 0;
   white-space: nowrap;
 }
@@ -878,7 +878,7 @@
   position: fixed;
   inset: 0;
   z-index: 200;
-  background: rgba(9,30,66,0.55);
+  background: rgba(26, 46, 68, 0.50);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -894,7 +894,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: 0 20px 60px rgba(9,30,66,0.3), 0 4px 16px rgba(9,30,66,0.15);
+  box-shadow: 0 20px 60px rgba(26, 46, 68, 0.22), 0 4px 16px rgba(26, 46, 68, 0.12);
 }
 
 .dup-fullview-header {
@@ -974,3 +974,92 @@
   justify-content: flex-end;
   flex-shrink: 0;
 }
+
+
+/* ── DecisionPanel ── */
+.dup-decision-panel {
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+  padding: 16px 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: dup-panel-in 200ms ease forwards;
+}
+
+@keyframes dup-panel-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.dup-decision-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.dup-decision-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dup-decision-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg-white);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+}
+
+.dup-decision-option-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.dup-decision-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+  color: var(--text-2);
+  width: 20px;
+  text-align: center;
+  margin-top: 1px;
+}
+
+.dup-decision-option-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+  line-height: 1.4;
+}
+
+.dup-decision-option-desc {
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.5;
+  margin-top: 2px;
+}
+
+.btn-decision-select {
+  background: #1A2E44;
+  color: white;
+  border: none;
+  border-radius: 7px;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-weight: 500;
+  font-family: 'Manrope', sans-serif;
+  cursor: pointer;
+  transition: background 150ms ease;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.btn-decision-select:hover:not(:disabled) { background: #243d58; }
+.btn-decision-select:disabled { opacity: 0.55; cursor: not-allowed; }

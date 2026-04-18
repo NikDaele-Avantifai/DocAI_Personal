@@ -1,22 +1,9 @@
-/* ── Floating button ── */
+/* ── Floating button — hidden ── */
 .chatbot-fab {
-  display: none;
-  position: fixed;
-  bottom: 24px; right: 24px;
-  width: 52px; height: 52px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #0052CC, #5B73FF);
-  color: white;
-  font-size: 20px; font-weight: 800;
-  font-family: 'Syne', sans-serif;
-  border: none; cursor: pointer;
-  box-shadow: 0 4px 16px rgba(0,82,204,0.35);
-  z-index: 500;
-  transition: all 0.2s;
-  display: flex; align-items: center; justify-content: center;
+  display: none !important;
 }
 
-.chatbot-fab:hover { transform: scale(1.06); box-shadow: 0 6px 20px rgba(0,82,204,0.45); }
+.chatbot-fab:hover { transform: scale(1.06); box-shadow: 0 6px 20px rgba(26, 46, 68, 0.35); }
 .chatbot-fab.active { background: var(--text-2); }
 
 /* ── Panel ── */
@@ -55,9 +42,9 @@
 .chatbot-avatar {
   width: 32px; height: 32px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #0052CC, #5B73FF);
+  background: var(--brand-navy);
   color: white; font-size: 13px; font-weight: 800;
-  font-family: 'Syne', sans-serif;
+  font-family: 'Nunito Sans', sans-serif;
   display: flex; align-items: center; justify-content: center;
 }
 
@@ -111,9 +98,9 @@
 .chatbot-welcome-avatar {
   width: 48px; height: 48px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #0052CC, #5B73FF);
+  background: var(--brand-navy);
   color: white; font-size: 20px; font-weight: 800;
-  font-family: 'Syne', sans-serif;
+  font-family: 'Nunito Sans', sans-serif;
   display: flex; align-items: center; justify-content: center;
 }
 
@@ -154,9 +141,9 @@
 .chatbot-msg-avatar {
   width: 24px; height: 24px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #0052CC, #5B73FF);
+  background: var(--brand-navy);
   color: white; font-size: 10px; font-weight: 800;
-  font-family: 'Syne', sans-serif;
+  font-family: 'Nunito Sans', sans-serif;
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
 }

@@ -64,11 +64,6 @@ export default function PagesPage() {
   const [selected, setSelected] = useState<PageNode | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
 
-  // Sync state
-  const [syncing, setSyncing] = useState(false)
-  const [syncError, setSyncError] = useState<string | null>(null)
-  const [lastSynced, setLastSynced] = useState<string | null>(null)
-
   // Per-page analysis cache (keyed by page ID)
   const [analyses, setAnalyses] = useState<Record<string, AnalysisResult>>({})
   const [analyzingId, setAnalyzingId] = useState<string | null>(null)
@@ -112,6 +107,15 @@ export default function PagesPage() {
     return () => window.removeEventListener("docai:pageHealthUpdated", onHealthUpdated)
   }, [])
 
+  // Re-fetch tree when sync completes from the topbar
+  useEffect(() => {
+    function onSyncComplete() {
+      setRefreshKey(k => k + 1)
+    }
+    window.addEventListener("docai:synccomplete", onSyncComplete)
+    return () => window.removeEventListener("docai:synccomplete", onSyncComplete)
+  }, [])
+
   // Load sweep data once on mount
   useEffect(() => {
     fetch(`${API_BASE}/api/sweep/latest`)
@@ -128,24 +132,6 @@ export default function PagesPage() {
   }, [])
 
   // ── Actions ────────────────────────────────────────────────────────────────
-
-  async function syncConfluence() {
-    setSyncing(true)
-    setSyncError(null)
-    try {
-      const res = await fetch(`${API_BASE}/api/sync/spaces`, { method: "POST" })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        throw new Error(body.detail ?? `API error ${res.status}`)
-      }
-      setLastSynced(new Date().toLocaleTimeString())
-      setRefreshKey(k => k + 1)
-    } catch (e) {
-      setSyncError(e instanceof Error ? e.message : "Sync failed")
-    } finally {
-      setSyncing(false)
-    }
-  }
 
   async function analyzeSelected(forceRefresh = false) {
     if (!selected) return

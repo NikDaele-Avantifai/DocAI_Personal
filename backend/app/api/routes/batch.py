@@ -3,6 +3,7 @@ Batch operations — scan entire workspace and create bulk proposals.
 Currently supports: rename (identify poorly-named pages and suggest better titles).
 """
 import json
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -24,56 +25,107 @@ client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 from app.api.routes.proposals import _proposals  # noqa: E402
 
 
-# ── Prompt ───────────────────────────────────────────────────────────────────
+# ── Constants ─────────────────────────────────────────────────────────────────
 
-RENAME_SYSTEM = """You are a documentation quality expert auditing Confluence page titles.
+_VALID_SHORT = {"faq", "api", "hr", "qa", "ui", "ux", "db"}
 
-Identify pages with POOR titles and suggest specific, professional alternatives.
+_POOR_PATTERNS = {
+    "untitled", "draft", "copy of", "new page", "test", "temp",
+    "wip", "tbd", "page 1", "document",
+}
 
-A title is POOR if it is:
-- A placeholder: "Untitled", "New Page", "Copy of ...", "Draft", "Test"
-- Too vague to be useful: just "Notes", "Meeting", "TODO", "WIP", "TBD", "Misc", "Page", "Temp"
-- Only a date or number without context: "2024-01-15", "Q1", "123", "Mar meeting"
-- Shorter than 4 characters
-- Meaningless abbreviations without context: "HR Q1", "TBD doc", "FYI"
-- Clearly auto-generated or accidental
+_DATE_RE = re.compile(
+    r"""^(
+        \d{4}[-/]\d{2}([-/]\d{2})?
+      | \d{1,2}[-/]\d{1,2}([-/]\d{2,4})?
+      | (january|february|march|april|may|june|july|august|
+         september|october|november|december)\s+\d{4}
+      | (jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\.?\s+\d{4}
+      | q[1-4]\s*\d{2,4}
+    )$""",
+    re.IGNORECASE | re.VERBOSE,
+)
 
-For each poor title, infer a better one using the space name and word count as context signals.
-A good title: specific (not generic), 3-7 words, professional, describes the document's purpose.
 
-Return ONLY a valid JSON array. Include ONLY pages that genuinely need renaming. If everything looks fine, return [].
+def _is_deterministic_poor(title: str) -> str | None:
+    """Return reason string if title is deterministically poor, else None."""
+    stripped = title.strip()
+    if not stripped:
+        return "Empty or whitespace-only title"
 
-Format (no other text):
+    low = stripped.lower()
+
+    for pat in _POOR_PATTERNS:
+        if low == pat or low.startswith(pat):
+            return f"Matches poor naming pattern '{pat}'"
+
+    words = stripped.split()
+    if len(words) == 1 and len(stripped) < 5 and low not in _VALID_SHORT:
+        return f"Single short word '{stripped}' gives no context"
+
+    if _DATE_RE.match(stripped):
+        return "Title is a date or date-like string"
+
+    return None
+
+
+# ── Prompt ────────────────────────────────────────────────────────────────────
+
+RENAME_SYSTEM = """You are a documentation quality expert auditing Confluence page titles for an enterprise workspace.
+
+CRITICAL RULES:
+1. NEVER flag structural navigation pages. Pages titled 'Overview', 'Home', 'Index', 'Contents', 'Navigation', 'Getting Started', 'Introduction', 'Welcome' are intentional structural titles — do NOT flag them regardless of their content.
+2. NEVER suggest 'Untitled Page' as a replacement. If you cannot determine a good title from the content, skip the page entirely.
+3. Suggested titles must be specific and descriptive — a reader should know exactly what the page contains from the title alone.
+4. Maximum 6 words. Title case. No special characters, no version numbers, no dates.
+5. Folders cannot be renamed via the API — include them in results with a note but mark isFolder: true.
+
+For each page, score title-to-content relevance 1-10. Flag if score < 4 OR deterministic=true.
+Skip if: the title is a clear structural navigation term (see rule 1).
+
+BAD suggestions: 'Untitled Page', 'Page Content', 'Document', 'General Information'
+GOOD suggestions: 'API Token Authentication Guide', 'Q3 Deployment Runbook', 'GDPR Data Retention Policy'
+
+FOLDER NAMING RULES:
+Folders are structural containers with no content of their own.
+When isFolder is true:
+- Generate the suggested title based ONLY on the childTitles array provided
+- The folder name should reflect the common theme or category of its children
+- Examples: children ['API Authentication Doc', 'API Integration Guide', 'OAuth Setup'] → folder name 'API Documentation'
+- Examples: children ['Q3 Sprint Retrospective', 'Q4 Sprint Retrospective', 'Meeting Notes'] → folder name 'Sprint Reviews'
+- If childTitles is empty, set suggestedTitle to null and skip this folder
+- Folder names should be 2-4 words maximum, broad enough to describe all children
+- Never suggest a folder name that is identical to one of its children
+
+Return ONLY a valid JSON array. If no pages need renaming, return [].
+
+Format:
 [
   {
-    "page_id": "string",
-    "current_title": "string",
-    "suggested_title": "string",
-    "rationale": "One sentence: why the current title is poor and why the suggestion is better.",
-    "confidence": 0-100
+    "pageId": "string",
+    "currentTitle": "string",
+    "suggestedTitle": "string — specific, max 6 words, title case",
+    "reason": "One sentence: what is wrong with the current title.",
+    "relevanceScore": 4,
+    "isFolder": false
   }
 ]"""
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def _build_proposal(page_id: str, page_title: str, space_key: str | None,
-                    suggested: str, rationale: str, confidence: int) -> dict[str, Any]:
+def _build_grouped_proposal(renames: list[dict[str, Any]]) -> dict[str, Any]:
     pid = str(uuid.uuid4())
     return {
         "id": pid,
         "action": "rename",
-        "source_page_id": page_id,
-        "source_page_title": page_title,
-        "space_key": space_key,
-        "new_content": suggested,        # suggested title stored here (mirrors edit flow)
-        "page_version": None,            # fetched from Confluence at apply time
-        "rationale": rationale,
-        "confidence": confidence,
-        "diff": json.dumps([
-            {"type": "remove", "content": page_title},
-            {"type": "add",    "content": suggested},
-        ]),
+        "category": "rename",
+        "source_page_id": renames[0]["pageId"] if renames else "",
+        "source_page_title": f"Rename suggestions ({len(renames)} pages)",
+        "rationale": f"DocAI identified {len(renames)} pages with poor or misleading titles.",
+        "confidence": 85,
+        "renames": renames,
+        "diff": "[]",
         "status": "pending",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "reviewed_at": None,
@@ -82,13 +134,18 @@ def _build_proposal(page_id: str, page_title: str, space_key: str | None,
 
 
 def _call_claude(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Send a batch of page metadata to Claude and return rename suggestions."""
+    """Send page metadata + content snippets to Claude and return rename suggestions."""
     payload = json.dumps([
         {
-            "id": p["id"],
+            "pageId": p["id"],
             "title": p["title"],
             "space": p["space_key"] or "",
-            "word_count": p["word_count"],
+            "contentSnippet": p.get("contentSnippet") or (p.get("content") or "")[:400],
+            "isFolder": p.get("is_folder", False),
+            "isEmptyPage": p.get("_is_empty_page", False),
+            "childTitles": p.get("childTitles", []),
+            "deterministic": p.get("_deterministic", False),
+            "deterministicReason": p.get("_det_reason", ""),
         }
         for p in pages
     ], ensure_ascii=False)
@@ -97,7 +154,7 @@ def _call_claude(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         model="claude-sonnet-4-20250514",
         max_tokens=4096,
         system=RENAME_SYSTEM,
-        messages=[{"role": "user", "content": f"Review these page titles:\n{payload}"}],
+        messages=[{"role": "user", "content": f"Review these pages:\n{payload}"}],
     )
 
     raw = msg.content[0].text.strip()
@@ -113,8 +170,8 @@ def _call_claude(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
 # ── Routes ───────────────────────────────────────────────────────────────────
 
 class BatchRenameRequest(BaseModel):
-    space_key: str | None = None   # None = all synced spaces
-    min_confidence: int = 70       # only create proposals above this threshold
+    space_key: str | None = None
+    min_confidence: int = 70
 
 
 @router.post("/rename")
@@ -123,10 +180,10 @@ async def batch_rename(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Scan all synced pages (or a single space) for poorly-named pages.
-    Uses Claude to suggest better titles and creates proposals for each.
+    Scan all synced pages for poorly-named pages.
+    Pre-filters deterministically, then uses Claude for content-relevance scoring.
+    Creates a single grouped rename proposal.
     """
-    # 1. Load pages from DB
     q = select(Page)
     if body.space_key:
         q = q.where(Page.space_key == body.space_key)
@@ -138,55 +195,126 @@ async def batch_rename(
             detail="No synced pages found. Run a Confluence sync first.",
         )
 
-    pages = [
-        {
+    pages = []
+    for p in rows:
+        det_reason = _is_deterministic_poor(p.title or "")
+        pages.append({
             "id": p.id,
-            "title": p.title,
+            "title": p.title or "",
             "space_key": p.space_key,
             "word_count": p.word_count,
-        }
-        for p in rows
+            "content": p.content or "",
+            "is_folder": bool(p.is_folder),
+            "_deterministic": det_reason is not None,
+            "_det_reason": det_reason or "",
+        })
+
+    # Build parent→children map for folder enrichment
+    all_pages = (await db.execute(select(Page))).scalars().all()
+    children_map: dict[str, list[str]] = {}
+    for p in all_pages:
+        if p.parent_id:
+            children_map.setdefault(p.parent_id, []).append(p.title or "")
+
+    # Enrich folders with children; classify empty pages
+    for p in pages:
+        if p.get("is_folder"):
+            child_titles = children_map.get(p["id"], [])
+            p["childTitles"] = child_titles[:10]
+            if child_titles:
+                p["contentSnippet"] = f"Folder containing: {', '.join(child_titles[:5])}"
+                # Re-evaluate deterministic flag with folder's current title
+                if not p.get("_deterministic"):
+                    det = _is_deterministic_poor(p["title"])
+                    if det:
+                        p["_deterministic"] = True
+                        p["_det_reason"] = det
+            else:
+                # Empty folder — no children to derive a name from
+                p["_skip"] = True
+
+        if not p.get("is_folder"):
+            is_empty = (p.get("word_count") or 0) < 10 and not p.get("content", "").strip()
+            if is_empty and not p.get("_deterministic"):
+                # Empty page with an acceptable title — nothing to rename
+                p["_skip"] = True
+                p["_skip_reason"] = "empty_content_acceptable_title"
+            elif is_empty and p.get("_deterministic"):
+                # Empty page with a bad title — flag for human review, don't send to Claude
+                p["_is_empty_page"] = True
+
+    # Collect empty pages with bad titles — add directly as manual-review suggestions
+    empty_bad_title_pages = [
+        p for p in pages
+        if not p.get("_skip") and not p.get("is_folder") and p.get("_is_empty_page")
     ]
 
-    # 2. Call Claude in batches of 200 pages
-    BATCH = 200
+    pages_to_scan = [p for p in pages if not p.get("_skip") and not p.get("_is_empty_page")]
+    skipped_empty_pages = sum(1 for p in pages if p.get("_skip") and not p.get("is_folder"))
+    skipped_empty_folders = sum(1 for p in pages if p.get("_skip") and p.get("is_folder"))
+
+    # Call Claude in batches of 50 (content snippets make payloads larger)
+    BATCH = 50
     suggestions: list[dict[str, Any]] = []
-    for i in range(0, len(pages), BATCH):
-        chunk = pages[i : i + BATCH]
+    for i in range(0, len(pages_to_scan), BATCH):
+        chunk = pages_to_scan[i : i + BATCH]
         try:
             results = _call_claude(chunk)
             suggestions.extend(results)
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"AI analysis failed: {exc}")
 
-    # 3. Build a lookup so we can attach space_key to each suggestion
-    page_map = {p["id"]: p for p in pages}
+    # Filter out bad suggestions that Claude sometimes produces
+    _bad_titles = {"untitled page", "untitled", "page", "document", "general information", "page content", "cannot determine from empty content"}
+    suggestions = [
+        s for s in suggestions
+        if s.get("suggestedTitle")
+        and s.get("suggestedTitle", "").lower() not in _bad_titles
+        and s.get("suggestedTitle", "") != s.get("currentTitle", "")
+    ]
 
-    # 4. Create proposals for suggestions above confidence threshold
-    created: list[str] = []
+    # Append empty pages with bad titles as manual-review entries (no Claude suggestion possible)
+    for p in empty_bad_title_pages:
+        suggestions.append({
+            "pageId": p["id"],
+            "currentTitle": p["title"],
+            "suggestedTitle": None,
+            "reason": f"Empty page with placeholder title '{p['title']}' — add content or delete this page.",
+            "relevanceScore": 1,
+            "isFolder": False,
+            "isEmptyPage": True,
+            "requiresHuman": True,
+        })
+
+    if not suggestions:
+        return {
+            "pages_scanned": len(pages),
+            "pages_flagged": 0,
+            "skipped_empty_pages": skipped_empty_pages,
+            "skipped_empty_folders": skipped_empty_folders,
+            "proposals_created": 0,
+            "proposal_ids": [],
+            "skipped_low_confidence": 0,
+        }
+
+    # Enrich suggestions with isFolder from the page map
+    page_map = {p["id"]: p for p in pages}
     for s in suggestions:
-        if s.get("confidence", 0) < body.min_confidence:
-            continue
-        page = page_map.get(s["page_id"])
-        if not page:
-            continue
-        proposal = _build_proposal(
-            page_id=s["page_id"],
-            page_title=s["current_title"],
-            space_key=page["space_key"],
-            suggested=s["suggested_title"],
-            rationale=s["rationale"],
-            confidence=int(s["confidence"]),
-        )
-        _proposals[proposal["id"]] = proposal
-        created.append(proposal["id"])
+        page = page_map.get(s.get("pageId", ""), {})
+        s.setdefault("isFolder", page.get("is_folder", False))
+
+    # Build single grouped proposal
+    proposal = _build_grouped_proposal(suggestions)
+    _proposals[proposal["id"]] = proposal
 
     return {
         "pages_scanned": len(pages),
         "pages_flagged": len(suggestions),
-        "proposals_created": len(created),
-        "proposal_ids": created,
-        "skipped_low_confidence": len(suggestions) - len(created),
+        "skipped_empty_pages": skipped_empty_pages,
+        "skipped_empty_folders": skipped_empty_folders,
+        "proposals_created": 1,
+        "proposal_ids": [proposal["id"]],
+        "skipped_low_confidence": 0,
     }
 
 
@@ -195,9 +323,6 @@ async def preview_rename_candidates(
     space_key: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Return raw page list that would be scanned — useful for UI to show count before scanning.
-    """
     q = select(Page.id, Page.title, Page.space_key, Page.word_count)
     if space_key:
         q = q.where(Page.space_key == space_key)

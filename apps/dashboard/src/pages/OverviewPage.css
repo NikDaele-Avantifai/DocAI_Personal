@@ -28,10 +28,12 @@
 }
 
 .ov-title {
-  font-size: 17px;
-  font-weight: 700;
-  color: var(--text-1);
+  font-size: 22px;
+  font-weight: 800;
+  font-family: 'Nunito Sans', sans-serif;
+  color: #0D1B2A;
   letter-spacing: -0.3px;
+  margin-bottom: 6px;
 }
 
 .ov-last-sweep {
@@ -45,19 +47,19 @@
   align-items: center;
   gap: 7px;
   padding: 8px 16px;
-  background: var(--text-1);
+  background: var(--accent);
   color: #fff;
   border: none;
   border-radius: 6px;
   font-size: 13px;
-  font-weight: 600;
-  font-family: inherit;
+  font-weight: 500;
+  font-family: 'Manrope', sans-serif;
   cursor: pointer;
-  transition: opacity 0.15s;
+  transition: background 150ms ease, box-shadow 150ms ease;
   white-space: nowrap;
 }
 
-.btn-sweep:hover:not(:disabled) { opacity: 0.82; }
+.btn-sweep:hover:not(:disabled) { background: var(--accent-hover); box-shadow: var(--shadow-sm); }
 .btn-sweep:disabled { opacity: 0.55; cursor: default; }
 
 .btn-sweep-icon { font-size: 14px; display: inline-block; line-height: 1; }
@@ -75,29 +77,25 @@
   justify-content: space-between;
   gap: 16px;
   padding: 11px 16px;
-  background: #fffbeb;
-  border: 1px solid #fde68a;
-  border-radius: 7px;
+  background: var(--bg-white);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-lg);
+  border-left-width: 3px;
 }
+
+.ov-alert-issues  { border-left-color: #D97706; }
+.ov-alert-healthy { border-left-color: #16A34A; }
 
 .ov-alert-left {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
 }
 
-.ov-alert-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #d97706;
-  box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.18);
-  flex-shrink: 0;
-}
-
 .ov-alert-msg {
-  font-size: 13px;
+  font-size: var(--text-base);
+  font-weight: var(--font-medium);
   color: var(--text-1);
   white-space: nowrap;
   overflow: hidden;
@@ -133,9 +131,9 @@
 
 .ov-metric {
   background: var(--bg-white);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 16px 18px 18px;
+  padding: 20px;
   box-shadow: var(--shadow-sm);
   display: flex;
   flex-direction: column;
@@ -166,9 +164,10 @@
 }
 
 .ov-metric-label {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
-  color: var(--text-2);
+  color: var(--text-3);
+  font-family: 'Manrope', sans-serif;
 }
 
 .ov-metric-badge {
@@ -187,6 +186,7 @@
   line-height: 1;
   letter-spacing: -0.5px;
   margin-bottom: 2px;
+  font-family: 'Nunito Sans', sans-serif;
 }
 
 .ov-metric-denom {
@@ -199,14 +199,15 @@
 .ov-metric-bar {
   height: 3px;
   background: var(--surface-3);
-  border-radius: 2px;
+  border-radius: 99px;
   overflow: hidden;
   margin: 4px 0 6px;
 }
 
 .ov-metric-bar-fill {
   height: 100%;
-  border-radius: 2px;
+  border-radius: 99px;
+  background: #87BAD0;
   transition: width 0.8s cubic-bezier(.4, 0, .2, 1);
 }
 
@@ -324,20 +325,20 @@
 /* Small sweep button (inside card header) */
 .btn-sweep-sm {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--accent);
   background: var(--accent-light);
-  border: none;
+  border: 1px solid var(--accent-border);
   padding: 5px 12px;
   border-radius: 6px;
   cursor: pointer;
-  font-family: inherit;
+  font-family: 'Manrope', sans-serif;
   flex-shrink: 0;
-  transition: opacity 0.15s;
+  transition: background 150ms ease;
   margin-top: 1px;
 }
 
-.btn-sweep-sm:hover { opacity: 0.8; }
+.btn-sweep-sm:hover { background: var(--bg-active); }
 
 /* ── Sweep progress ── */
 .ov-sweep-progress {
@@ -359,8 +360,8 @@
 
 .ov-sweep-bar-fill {
   height: 100%;
-  background: var(--accent);
-  border-radius: 2px;
+  background: #87BAD0;
+  border-radius: 99px;
   animation: sweep-indeterminate 1.4s ease-in-out infinite;
 }
 
@@ -408,7 +409,8 @@
 
 .ov-issue-bar-fill {
   height: 100%;
-  border-radius: 2px;
+  border-radius: 99px;
+  background: #87BAD0;
   transition: width 0.7s cubic-bezier(.4, 0, .2, 1);
 }
 
@@ -488,6 +490,15 @@
 .ov-risk-words {
   font-size: 11px;
   color: var(--text-3);
+}
+
+.ov-risk-folder-badge {
+  font-size: 10px;
+  color: #64748b;
+  background: rgba(100, 116, 139, 0.09);
+  padding: 2px 6px;
+  border-radius: 3px;
+  cursor: default;
 }
 
 .ov-risk-flags {

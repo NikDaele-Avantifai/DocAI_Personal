@@ -64,9 +64,10 @@
 .settings-section-header { }
 
 .settings-section-title {
-  font-size: 17px;
-  font-weight: 700;
-  color: var(--text-1);
+  font-size: 22px;
+  font-weight: 800;
+  font-family: 'Nunito Sans', sans-serif;
+  color: #0D1B2A;
   margin-bottom: 4px;
 }
 
@@ -221,10 +222,10 @@
 .settings-integration-icon {
   width: 36px; height: 36px;
   border-radius: 8px;
-  background: linear-gradient(135deg, #0052CC, #5B73FF);
+  background: var(--brand-navy);
   color: white;
   font-size: 16px; font-weight: 800;
-  font-family: 'Syne', sans-serif;
+  font-family: 'Nunito Sans', sans-serif;
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
 }

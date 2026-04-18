@@ -12,6 +12,15 @@ type RenameResult = {
   proposals_created: number
   proposal_ids: string[]
   skipped_low_confidence: number
+  skipped_empty_pages?: number
+  skipped_empty_folders?: number
+}
+
+type RenamePreviewItem = {
+  pageId: string
+  currentTitle: string
+  suggestedTitle: string
+  isFolder?: boolean
 }
 
 type ScanState = "idle" | "loading_spaces" | "ready" | "scanning" | "done" | "error"
@@ -36,6 +45,8 @@ export default function BatchPage() {
   const [result, setResult] = useState<RenameResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [scanMsgIdx, setScanMsgIdx] = useState(0)
+  const [previewRenames, setPreviewRenames] = useState<RenamePreviewItem[]>([])
+  const [previewOpen, setPreviewOpen] = useState(false)
 
   // Load synced spaces on mount
   useEffect(() => {
@@ -91,6 +102,18 @@ export default function BatchPage() {
 
       const data: RenameResult = await res.json()
       setResult(data)
+
+      // Fetch the proposal to populate the inline preview
+      if (data.proposal_ids?.length > 0) {
+        try {
+          const propRes = await fetch(`${API_BASE}/api/proposals/${data.proposal_ids[0]}`)
+          if (propRes.ok) {
+            const propData = await propRes.json()
+            setPreviewRenames(propData.renames ?? [])
+          }
+        } catch {/* preview is best-effort */}
+      }
+
       setScanState("done")
     } catch (e) {
       setError(e instanceof Error ? e.message : "Scan failed")
@@ -101,6 +124,8 @@ export default function BatchPage() {
   function reset() {
     setResult(null)
     setError(null)
+    setPreviewRenames([])
+    setPreviewOpen(false)
     setScanState("ready")
   }
 
@@ -227,6 +252,16 @@ export default function BatchPage() {
               </>
             )}
           </div>
+          {((result.skipped_empty_pages ?? 0) > 0 || (result.skipped_empty_folders ?? 0) > 0) && (
+            <div className="summary-skipped">
+              {(result.skipped_empty_pages ?? 0) > 0 && (
+                <span>{result.skipped_empty_pages} page{result.skipped_empty_pages !== 1 ? "s" : ""} skipped — no content yet</span>
+              )}
+              {(result.skipped_empty_folders ?? 0) > 0 && (
+                <span>{result.skipped_empty_folders} empty folder{result.skipped_empty_folders !== 1 ? "s" : ""} skipped</span>
+              )}
+            </div>
+          )}
 
           {result.proposals_created === 0 ? (
             <div className="results-empty">
@@ -251,6 +286,44 @@ export default function BatchPage() {
                 </p>
               </div>
 
+              {previewRenames.length > 0 && (
+                <div className="batch-preview-section">
+                  <button
+                    className="batch-preview-toggle"
+                    onClick={() => setPreviewOpen(o => !o)}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                      style={{ transform: previewOpen ? "rotate(90deg)" : "rotate(0deg)", transition: "transform 0.15s" }}>
+                      <polyline points="9,18 15,12 9,6"/>
+                    </svg>
+                    Pages flagged ({previewRenames.length})
+                  </button>
+                  {previewOpen && (
+                    <div className="batch-preview-list">
+                      {previewRenames.map(r => (
+                        <div key={r.pageId} className="batch-preview-row">
+                          {r.isFolder ? (
+                            <svg className="batch-preview-icon batch-preview-folder-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                            </svg>
+                          ) : (
+                            <svg className="batch-preview-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                              <polyline points="14,2 14,8 20,8"/>
+                            </svg>
+                          )}
+                          <span className="batch-preview-current">{r.currentTitle}</span>
+                          <span className="batch-preview-arrow">→</span>
+                          <span className="batch-preview-suggested">{r.suggestedTitle}</span>
+                        </div>
+                      ))}
+                      <div className="batch-preview-note">
+                        These suggestions will be created as a proposal in Approvals for your review.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="results-cta-row">
                 <button className="btn-goto-approvals" onClick={() => navigate("/approvals")}>
                   Review in Approvals ↗
@@ -258,13 +331,6 @@ export default function BatchPage() {
                 <button className="btn-ghost" onClick={reset}>
                   Scan again
                 </button>
-              </div>
-
-              <div className="results-preview">
-                <div className="results-preview-label">Proposals created</div>
-                <div className="results-preview-count-badge">
-                  {result.proposals_created} pending review
-                </div>
               </div>
             </>
           )}
