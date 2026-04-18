@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react"
 import "./SpaceTree.css"
-
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from '@/lib/api'
 const HEALTH_STALE_DAYS = 180
 
 export type PageNode = {

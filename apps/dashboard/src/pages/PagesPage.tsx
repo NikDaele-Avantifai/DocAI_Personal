@@ -3,8 +3,7 @@ import { useNavigate } from "react-router-dom"
 import "./PagesPage.css"
 import SpaceTree, { type PageNode } from "../components/SpaceTree"
 import ContentViewer, { type Issue as ContentIssue } from "../components/ContentViewer"
-
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from '@/lib/api'
 
 type EditType = "restructure" | "add_summary" | "rewrite" | "remove_section" | "targeted_fix"
 

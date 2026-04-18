@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react"
 import "./AuditPage.css"
-
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from '@/lib/api'
 
 type AuditEntry = {
   id: string

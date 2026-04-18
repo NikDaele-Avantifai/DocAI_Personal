@@ -8,6 +8,7 @@ import React, {
   type ReactNode,
 } from "react"
 import "./ContentViewer.css"
+import { API_BASE } from '@/lib/api'
 
 // ── Exported types ─────────────────────────────────────────────────────────
 
@@ -626,7 +627,7 @@ export default function ContentViewer({
     if (dismissedKeys.has(k) || dismissingKey === k) return
     setDismissingKey(k)
     try {
-      await fetch(`http://localhost:8000/api/pages/${pageId}/dismiss`, {
+      await fetch(`${API_BASE}/api/pages/${pageId}/dismiss`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

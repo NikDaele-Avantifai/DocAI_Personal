@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useNavigate } from "react-router-dom"
 import "./SearchModal.css"
-
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from '@/lib/api'
 
 interface SearchResult {
   id: string

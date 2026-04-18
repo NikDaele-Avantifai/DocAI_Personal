@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef } from "react"
 import { useLocation } from "react-router-dom"
 import "./ChatBot.css"
-
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from '@/lib/api'
 
 interface Message {
   role: "user" | "assistant"

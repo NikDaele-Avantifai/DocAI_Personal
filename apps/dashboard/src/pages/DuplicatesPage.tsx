@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo } from "react"
 import { useNavigate } from "react-router-dom"
 import "./DuplicatesPage.css"
-
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from '@/lib/api'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

@@ -4,8 +4,7 @@ import { AlertCircle, CheckCircle2, Folder } from "lucide-react"
 import { SkeletonRow } from "../components/Skeleton"
 import { useTour } from "../contexts/TourContext"
 import "./OverviewPage.css"
-
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from '@/lib/api'
 
 type IssueCategory = "stale" | "empty" | "no_owner" | "generic_title" | "needs_review"
 

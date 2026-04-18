@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import "./SettingsPage.css"
-
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from '@/lib/api'
 
 type Tab = "profile" | "integrations" | "preferences" | "analysis" | "privacy" | "about"
 

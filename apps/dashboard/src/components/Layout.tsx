@@ -3,9 +3,7 @@ import { Outlet, NavLink, useLocation } from "react-router-dom"
 import "./Layout.css"
 import { useTour } from '../contexts/TourContext'
 import { useAuth } from '../contexts/AuthContext'
-import { authFetch } from '../lib/api'
-
-const API_BASE = "http://localhost:8000"
+import { authFetch, API_BASE } from '../lib/api'
 
 const WORKSPACE_NAV = [
   { to: "/overview",   icon: "⬡", label: "Overview"    },

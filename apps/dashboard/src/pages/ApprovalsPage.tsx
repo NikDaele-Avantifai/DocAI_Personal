@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react"
 import "./ApprovalsPage.css"
+import { API_BASE } from '@/lib/api'
 
 type DiffLine = {
   type: "add" | "remove" | "context" | "hunk"
@@ -96,7 +97,6 @@ const ACTION_STYLE: Record<string, { color: string; bg: string }> = {
   rename:         { color: "#006644", bg: "rgba(0,102,68,0.08)"   },
 }
 
-const API_BASE = "http://localhost:8000"
 
 type NormalisedProposal = ReturnType<typeof normalise>
 
