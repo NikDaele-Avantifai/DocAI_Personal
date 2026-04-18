@@ -68,7 +68,10 @@ export async function authFetch(
   }
   const res = await fetch(input, { ...init, headers })
   if (res.status === 401) {
-    window.location.href = "/login"
+    // Only redirect if not already on login page
+    if (!window.location.pathname.includes('/login')) {
+      window.location.href = "/login"
+    }
   }
   return res
 }
