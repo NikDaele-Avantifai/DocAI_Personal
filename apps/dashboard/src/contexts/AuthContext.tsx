@@ -9,9 +9,10 @@
  * useAuth0(). The bypass branch returns a synthetic dev user instead.
  */
 
-import { createContext, useContext, useEffect, ReactNode } from "react"
+import { createContext, useContext, useEffect, useState, ReactNode } from "react"
 import { useAuth0 } from "@auth0/auth0-react"
-import { setAccessToken } from "@/lib/api"
+import { useQueryClient } from "@tanstack/react-query"
+import { setAccessToken, setTokenRefreshing } from "@/lib/api"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -28,6 +29,7 @@ interface AuthContextValue {
   user: AuthUser | null
   isAuthenticated: boolean
   isLoading: boolean
+  isTokenReady: boolean
   logout: () => void
 }
 
@@ -37,6 +39,7 @@ const AuthContext = createContext<AuthContextValue>({
   user: null,
   isAuthenticated: false,
   isLoading: false,
+  isTokenReady: false,
   logout: () => {},
 })
 
@@ -51,21 +54,32 @@ function RealAuthProvider({ children }: { children: ReactNode }) {
     getAccessTokenSilently,
   } = useAuth0()
 
+  const [isTokenReady, setIsTokenReady] = useState(false)
+  const queryClient = useQueryClient()
+
   useEffect(() => {
     if (!isAuthenticated) {
       setAccessToken(null)
+      setIsTokenReady(false)
       return
     }
     function refreshToken() {
+      setTokenRefreshing(true)
       getAccessTokenSilently({
         authorizationParams: {
           audience: import.meta.env.VITE_AUTH0_AUDIENCE,
         },
       })
-        .then(token => setAccessToken(token))
+        .then(token => {
+          setAccessToken(token)
+          setIsTokenReady(true)
+          setTokenRefreshing(false)
+        })
         .catch(err => {
           console.error("Token fetch failed:", err)
           setAccessToken(null)
+          setIsTokenReady(false)
+          setTokenRefreshing(false)
         })
     }
     refreshToken()
@@ -85,11 +99,13 @@ function RealAuthProvider({ children }: { children: ReactNode }) {
 
   function logout() {
     setAccessToken(null)
+    setIsTokenReady(false)
+    queryClient.clear()
     auth0Logout({ logoutParams: { returnTo: window.location.origin + "/login" } })
   }
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated, isLoading, logout }}>
+    <AuthContext.Provider value={{ user, isAuthenticated, isLoading, isTokenReady, logout }}>
       {children}
     </AuthContext.Provider>
   )
@@ -111,6 +127,7 @@ function BypassAuthProvider({ children }: { children: ReactNode }) {
         user: DEV_USER,
         isAuthenticated: true,
         isLoading: false,
+        isTokenReady: true,
         logout: () => {},
       }}>
       {children}

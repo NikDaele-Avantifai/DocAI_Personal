@@ -20,6 +20,11 @@ export const apiClient = axios.create({
 })
 
 let _accessToken: string | null = null
+let _isRefreshingToken = false
+
+export function setTokenRefreshing(refreshing: boolean): void {
+  _isRefreshingToken = refreshing
+}
 
 /** Called by AuthContext after Auth0 returns a fresh token. */
 export function setAccessToken(token: string | null): void {
@@ -45,8 +50,7 @@ apiClient.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401) {
-      // Only redirect if not already on login page
-      if (!window.location.pathname.includes('/login')) {
+      if (!window.location.pathname.includes('/login') && !_isRefreshingToken) {
         window.location.href = "/login"
       }
     }
@@ -68,8 +72,7 @@ export async function authFetch(
   }
   const res = await fetch(input, { ...init, headers })
   if (res.status === 401) {
-    // Only redirect if not already on login page
-    if (!window.location.pathname.includes('/login')) {
+    if (!window.location.pathname.includes('/login') && !_isRefreshingToken) {
       window.location.href = "/login"
     }
   }
