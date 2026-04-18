@@ -5,13 +5,14 @@ interface SkeletonProps {
   height?: string | number
   borderRadius?: string | number
   className?: string
+  style?: React.CSSProperties
 }
 
-export function Skeleton({ width = "100%", height = 16, borderRadius = 4, className = "" }: SkeletonProps) {
+export function Skeleton({ width = "100%", height = 16, borderRadius = 4, className = "", style }: SkeletonProps) {
   return (
     <div
       className={`skeleton ${className}`}
-      style={{ width, height, borderRadius }}
+      style={{ width, height, borderRadius, ...style }}
     />
   )
 }
