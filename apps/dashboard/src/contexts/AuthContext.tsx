@@ -56,13 +56,17 @@ function RealAuthProvider({ children }: { children: ReactNode }) {
       setAccessToken(null)
       return
     }
-    async function refreshToken() {
-      try {
-        const token = await getAccessTokenSilently()
-        setAccessToken(token)
-      } catch {
-        setAccessToken(null)
-      }
+    function refreshToken() {
+      getAccessTokenSilently({
+        authorizationParams: {
+          audience: import.meta.env.VITE_AUTH0_AUDIENCE,
+        },
+      })
+        .then(token => setAccessToken(token))
+        .catch(err => {
+          console.error("Token fetch failed:", err)
+          setAccessToken(null)
+        })
     }
     refreshToken()
     const interval = setInterval(refreshToken, 50 * 60 * 1000)

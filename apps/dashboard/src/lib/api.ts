@@ -45,12 +45,14 @@ apiClient.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401) {
-      window.location.href = "/login"
+      // Only redirect if not already on login page
+      if (!window.location.pathname.includes('/login')) {
+        window.location.href = "/login"
+      }
     }
     return Promise.reject(err)
   },
 )
-
 /**
  * Drop-in replacement for window.fetch that attaches the bearer token.
  * Existing components that still use raw fetch() can import this instead
