@@ -1,11 +1,14 @@
 import { Routes, Route, Navigate } from "react-router-dom"
 import Layout from "./components/Layout"
+import ProtectedRoute from "./components/ProtectedRoute"
 import SearchModal from "./components/SearchModal"
 import NotificationPanel from "./components/NotificationPanel"
 import ChatBot from "./components/ChatBot"
 import TourOverlay from "./components/TourOverlay"
 import { TourProvider } from "./contexts/TourContext"
+import { AuthProvider } from "./contexts/AuthContext"
 
+import LoginPage from "./pages/LoginPage"
 import OverviewPage from "./pages/OverviewPage"
 import ApprovalsPage from "./pages/ApprovalsPage"
 import AuditPage from "./pages/AuditPage"
@@ -14,33 +17,51 @@ import BatchPage from "./pages/BatchPage"
 import DuplicatesPage from "./pages/DuplicatesPage"
 import SettingsPage from "./pages/SettingsPage"
 
-function App() {
-  return (
-    <TourProvider>
-      <>
-        <Routes>
-          <Route element={<Layout />}>
-            <Route index element={<Navigate to="/overview" replace />} />
-            <Route path="/overview"    element={<OverviewPage />} />
-            <Route path="/dashboard"   element={<Navigate to="/overview" replace />} />
-            <Route path="/pages"       element={<PagesPage />} />
-            <Route path="/duplicates"  element={<DuplicatesPage />} />
-            <Route path="/proposals"   element={<ApprovalsPage />} />
-            <Route path="/approvals"   element={<Navigate to="/proposals" replace />} />
-            <Route path="/audit"       element={<AuditPage />} />
-            <Route path="/batch-rename" element={<BatchPage />} />
-            <Route path="/batch"       element={<Navigate to="/batch-rename" replace />} />
-            <Route path="/settings"    element={<SettingsPage />} />
-            <Route path="/settings/:tab" element={<SettingsPage />} />
-          </Route>
-        </Routes>
+interface AppProps {
+  /** True when Auth0 is not configured (local dev). All routes are accessible. */
+  bypassAuth?: boolean
+}
 
-        <TourOverlay />
-        <SearchModal />
-        <NotificationPanel />
-        <ChatBot />
-      </>
-    </TourProvider>
+function App({ bypassAuth = false }: AppProps) {
+  // In dev-bypass mode we still wrap with AuthProvider — it will just return
+  // null for the user and isAuthenticated=false, but since ProtectedRoute
+  // is also bypassed, no redirect happens.
+  const wrap = (el: React.ReactNode) =>
+    bypassAuth ? <>{el}</> : <ProtectedRoute>{el}</ProtectedRoute>
+
+  return (
+    <AuthProvider bypass={bypassAuth}>
+      <TourProvider>
+        <>
+          <Routes>
+            {/* Public */}
+            <Route path="/login" element={<LoginPage />} />
+
+            {/* Protected — everything under Layout */}
+            <Route
+              element={wrap(<Layout />)}>
+              <Route index element={<Navigate to="/overview" replace />} />
+              <Route path="/overview"     element={<OverviewPage />} />
+              <Route path="/dashboard"    element={<Navigate to="/overview" replace />} />
+              <Route path="/pages"        element={<PagesPage />} />
+              <Route path="/duplicates"   element={<DuplicatesPage />} />
+              <Route path="/proposals"    element={<ApprovalsPage />} />
+              <Route path="/approvals"    element={<Navigate to="/proposals" replace />} />
+              <Route path="/audit"        element={<AuditPage />} />
+              <Route path="/batch-rename" element={<BatchPage />} />
+              <Route path="/batch"        element={<Navigate to="/batch-rename" replace />} />
+              <Route path="/settings"     element={<SettingsPage />} />
+              <Route path="/settings/:tab" element={<SettingsPage />} />
+            </Route>
+          </Routes>
+
+          <TourOverlay />
+          <SearchModal />
+          <NotificationPanel />
+          <ChatBot />
+        </>
+      </TourProvider>
+    </AuthProvider>
   )
 }
 

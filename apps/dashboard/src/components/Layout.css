@@ -283,6 +283,34 @@ button { font-family: inherit; cursor: pointer; }
   font-size: 10.5px; color: var(--text-3);
 }
 
+.sidebar-signout-btn {
+  flex-shrink: 0;
+  width: 24px; height: 24px;
+  border: none; background: transparent;
+  color: var(--text-3);
+  font-size: 13px;
+  border-radius: 5px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s, color 0.15s;
+  opacity: 0;
+}
+
+.sidebar-footer:hover .sidebar-signout-btn,
+.sidebar.collapsed:hover .sidebar-signout-btn {
+  opacity: 1;
+}
+
+.sidebar-signout-btn:hover {
+  background: var(--bg-hover, rgba(255,255,255,0.06));
+  color: var(--text-1);
+}
+
+/* Hide sign-out text label in collapsed sidebar */
+.sidebar.collapsed:not(:hover) .sidebar-signout-btn {
+  display: none;
+}
+
 /* ── Top bar ── */
 .topbar {
   height: var(--topbar-h);

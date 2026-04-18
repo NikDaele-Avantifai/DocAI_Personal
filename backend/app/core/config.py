@@ -15,10 +15,15 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "postgresql+asyncpg://postgres@localhost:5432/doc_ai_db"
 
-    # Azure Entra ID
+    # Azure Entra ID (legacy — replaced by Auth0)
     azure_tenant_id: str = ""
     azure_client_id: str = ""
     azure_client_secret: str = ""
+
+    # Auth0
+    auth0_domain: str = ""        # e.g. yourorg.auth0.com
+    auth0_audience: str = ""      # API identifier, e.g. https://api.docai.io
+    auth0_client_id: str = ""     # SPA client ID (used for token validation metadata)
 
     # Anthropic
     anthropic_api_key: str = ""

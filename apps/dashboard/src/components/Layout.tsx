@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from "react"
 import { Outlet, NavLink, useLocation } from "react-router-dom"
 import "./Layout.css"
 import { useTour } from '../contexts/TourContext'
+import { useAuth } from '../contexts/AuthContext'
+import { authFetch } from '../lib/api'
 
 const API_BASE = "http://localhost:8000"
 
@@ -49,18 +51,28 @@ export default function Layout() {
   const [notifCount, setNotifCount] = useState(0)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const profileRef = useRef<HTMLDivElement>(null)
-  const { startTour, isDemoMode } = useTour()
+  const { isDemoMode } = useTour()
+  const { user, logout } = useAuth()
 
-  // Load user profile from localStorage
-  const profile = (() => {
+  function handleSignOut() {
+    if (import.meta.env.VITE_AUTH0_DOMAIN) {
+      logout()
+    } else {
+      window.location.href = "/login"
+    }
+  }
+
+  // User identity — prefer Auth0, fall back to localStorage for dev-bypass mode
+  const localProfile = (() => {
     try { return JSON.parse(localStorage.getItem("docai_profile") || "{}") } catch { return {} }
   })()
-  const userName: string = profile.name || "User"
-  const userRole: string = profile.role || "Admin"
+  const userName: string  = user?.name  || localProfile.name  || "User"
+  const userEmail: string = user?.email || localProfile.email || ""
+  const userRole: string  = user?.roles?.[0] || localProfile.role || "Admin"
   const initials = userName.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2) || "U"
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/stats/`)
+    authFetch(`${API_BASE}/api/stats/`)
       .then(r => r.json())
       .then(d => {
         setPendingCount(d.proposals_pending ?? 0)
@@ -96,7 +108,7 @@ export default function Layout() {
   async function handleSync() {
     setSyncing(true)
     try {
-      await fetch(`${API_BASE}/api/sync/spaces`, { method: "POST" })
+      await authFetch(`${API_BASE}/api/sync/spaces`, { method: "POST" })
       const now = new Date().toISOString()
       setLastSync(now)
       // Notify all pages to re-fetch their data without a browser refresh
@@ -171,7 +183,7 @@ export default function Layout() {
           </div> */}
         </nav>
 
-        {/* Footer — user identity only */}
+        {/* Footer — user identity + sign out */}
         <div className="sidebar-footer">
           <div className="sidebar-footer-top">
             <div
@@ -184,6 +196,12 @@ export default function Layout() {
               <div className="sidebar-user-name">{userName}</div>
               <div className="sidebar-user-role">{userRole}</div>
             </div>
+            <button
+              className="sidebar-signout-btn"
+              title="Sign out"
+              onClick={handleSignOut}>
+              ↩
+            </button>
           </div>
         </div>
 
@@ -192,7 +210,7 @@ export default function Layout() {
           <div className="profile-dropdown" ref={profileRef}>
             <div className="profile-dropdown-header">
               <div className="profile-dropdown-name">{userName}</div>
-              <div className="profile-dropdown-email">{profile.email || "—"}</div>
+              <div className="profile-dropdown-email">{userEmail || "—"}</div>
               <div className="profile-dropdown-role">{userRole}</div>
             </div>
             <NavLink
@@ -214,7 +232,9 @@ export default function Layout() {
               Keyboard shortcuts
             </button>
             <div className="profile-dropdown-divider" />
-            <button className="profile-dropdown-item danger">
+            <button
+              className="profile-dropdown-item danger"
+              onClick={() => { setProfileOpen(false); handleSignOut() }}>
               ↩ Sign out
             </button>
           </div>
