@@ -25,11 +25,10 @@ app = FastAPI(
 )
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
-# In production, lock this down to your actual frontend domain
 origins = (
     ["*"]
     if not settings.is_production
-    else ["https://app.docai.io"]  # update with real domain
+    else ["https://app.avantifai.com"]
 )
 
 app.add_middleware(
