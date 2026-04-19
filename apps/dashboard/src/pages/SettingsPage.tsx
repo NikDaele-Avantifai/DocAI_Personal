@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import "./SettingsPage.css"
-import { apiClient } from '@/lib/api'
+import { apiClient, API_BASE } from '@/lib/api'
 
 type Tab = "profile" | "integrations" | "preferences" | "analysis" | "privacy" | "about"
 
