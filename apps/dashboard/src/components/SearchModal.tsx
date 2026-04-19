@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useNavigate } from "react-router-dom"
 import "./SearchModal.css"
-import { API_BASE } from '@/lib/api'
+import { apiClient } from '@/lib/api'
 
 interface SearchResult {
   id: string
@@ -36,9 +36,9 @@ export default function SearchModal() {
     async function loadIndex() {
       try {
         const [pagesRes, propsRes, auditRes] = await Promise.allSettled([
-          fetch(`${API_BASE}/api/sync/spaces`).then(r => r.json()),
-          fetch(`${API_BASE}/api/proposals/`).then(r => r.json()),
-          fetch(`${API_BASE}/api/audit/`).then(r => r.json()),
+          apiClient.get('/api/sync/spaces').then(r => r.data),
+          apiClient.get('/api/proposals/').then(r => r.data),
+          apiClient.get('/api/audit/').then(r => r.data),
         ])
 
         const items: SearchResult[] = []

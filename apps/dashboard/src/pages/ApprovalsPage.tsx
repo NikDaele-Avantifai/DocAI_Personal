@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import "./ApprovalsPage.css"
-import { API_BASE } from '@/lib/api'
+import { apiClient } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
 
 type DiffLine = {
@@ -133,8 +133,8 @@ export default function ApprovalsPage() {
   // Load proposals from API on mount — wait for token
   useEffect(() => {
     if (!isTokenReady) return
-    fetch(`${API_BASE}/api/proposals/`)
-      .then(r => r.json())
+    apiClient.get('/api/proposals/')
+      .then(r => r.data)
       .then(data => {
         const apiProposals = ((data.proposals ?? []) as Proposal[]).map(normalise)
         setProposals(apiProposals)
@@ -154,11 +154,8 @@ export default function ApprovalsPage() {
     setSelected((prev: NormalisedProposal | null) => prev?.id === id ? { ...prev, status: decision } : prev)
 
     // Call real API (best-effort — mock proposals won't exist server-side)
-    await fetch(`${API_BASE}/api/proposals/${id}/review`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: decision, reviewed_by: "Dashboard User" }),
-    }).catch(() => {/* ignore if mock proposal or backend unavailable */})
+    await apiClient.patch(`/api/proposals/${id}/review`, { status: decision, reviewed_by: "Dashboard User" })
+      .catch(() => {/* ignore if mock proposal or backend unavailable */})
   }
 
   async function applyToConfluence() {
@@ -167,19 +164,10 @@ export default function ApprovalsPage() {
     setApplyError(null)
 
     try {
-      const res = await fetch(`${API_BASE}/api/proposals/${selected.id}/apply`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          applied_by: "Dashboard User",
-          content_override: editedContents[selected.id] ?? null,
-        }),
+      await apiClient.post(`/api/proposals/${selected.id}/apply`, {
+        applied_by: "Dashboard User",
+        content_override: editedContents[selected.id] ?? null,
       })
-
-      if (!res.ok) {
-        const errBody = await res.json().catch(() => ({}))
-        throw new Error(errBody.detail ?? `API error ${res.status}`)
-      }
 
       setProposals((prev: NormalisedProposal[]) => prev.map((p: NormalisedProposal) => p.id === selected.id ? { ...p, status: "applied" } : p))
       setSelected((prev: NormalisedProposal | null) => prev?.id === selected.id ? { ...prev, status: "applied" } : prev)
@@ -188,11 +176,8 @@ export default function ApprovalsPage() {
       const pageId = selected.source_page_id
       if (pageId) {
         try {
-          const pageData = await fetch(`${API_BASE}/api/sync/pages/${pageId}`).then(r => r.json())
-          const analyzeRes = await fetch(`${API_BASE}/api/analyze/?force_refresh=true`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+          const pageData = await apiClient.get(`/api/sync/pages/${pageId}`).then(r => r.data)
+          const analyzeResult = await apiClient.post('/api/analyze/?force_refresh=true', {
               url:           pageData.url ?? "",
               title:         pageData.title ?? selected.pageTitle,
               content:       pageData.content ?? "",
@@ -200,10 +185,9 @@ export default function ApprovalsPage() {
               owner:         pageData.owner ?? null,
               page_id:       pageId,
               page_version:  pageData.version ?? 1,
-            }),
-          })
-          if (analyzeRes.ok) {
-            const result = await analyzeRes.json()
+          }).then(r => r.data)
+          if (analyzeResult) {
+            const result = analyzeResult
             // Broadcast the updated health status so PagesPage and OverviewPage can react
             window.dispatchEvent(new CustomEvent("docai:pageHealthUpdated", {
               detail: {
@@ -231,8 +215,8 @@ export default function ApprovalsPage() {
     setLoadingContent(prev => new Set([...prev, ...missing]))
     Promise.all(
       missing.map(id =>
-        fetch(`${API_BASE}/api/sync/pages/${id}`)
-          .then(r => r.json())
+        apiClient.get(`/api/sync/pages/${id}`)
+          .then(r => r.data)
           .then(d => ({ id, content: d.content ?? "" }))
           .catch(() => ({ id, content: "" }))
       )
@@ -267,15 +251,7 @@ export default function ApprovalsPage() {
     setRollbackLoading(true)
     setRollbackError(null)
     try {
-      const res = await fetch(`${API_BASE}/api/proposals/${selected.id}/rollback`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rolled_back_by: "Dashboard User" }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.detail ?? `API error ${res.status}`)
-      }
+      await apiClient.post(`/api/proposals/${selected.id}/rollback`, { rolled_back_by: "Dashboard User" })
       setRollbackDone(prev => new Set([...prev, selected.id]))
       setProposals(prev => prev.map(p => p.id === selected.id ? { ...p, status: "pending" as const } : p))
       setSelected(prev => prev?.id === selected.id ? { ...prev, status: "pending" as const } : prev)
@@ -290,15 +266,7 @@ export default function ApprovalsPage() {
     setRenameLoading(prev => new Set([...prev, pageId]))
     setRenameError(null)
     try {
-      const res = await fetch(`${API_BASE}/api/proposals/${proposalId}/apply-rename`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ page_id: pageId, suggested_title: suggestedTitle, applied_by: "Dashboard User" }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.detail ?? `API error ${res.status}`)
-      }
+      await apiClient.post(`/api/proposals/${proposalId}/apply-rename`, { page_id: pageId, suggested_title: suggestedTitle, applied_by: "Dashboard User" })
       setRenameApplied(prev => new Set([...prev, pageId]))
       // Update title in the proposal renames list in-place
       setProposals(prev => prev.map(p => {

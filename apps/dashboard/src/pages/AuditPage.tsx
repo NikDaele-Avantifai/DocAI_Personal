@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import "./AuditPage.css"
-import { API_BASE } from '@/lib/api'
+import { apiClient } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
 
 type AuditEntry = {
@@ -71,8 +71,8 @@ export default function AuditPage() {
   function loadEntries() {
     setLoading(true)
     const qs = filter !== "all" ? `?decision=${filter}` : ""
-    fetch(`${API_BASE}/api/audit/${qs}`)
-      .then(r => r.json())
+    apiClient.get(`/api/audit/${qs}`)
+      .then(r => r.data)
       .then(data => {
         setEntries(data.entries ?? [])
         setTotal(data.total ?? 0)
@@ -87,20 +87,11 @@ export default function AuditPage() {
     setRollingBack(snapshotId)
     setConfirmId(null)
     try {
-      const res = await fetch(`${API_BASE}/api/rollback/${snapshotId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rolled_back_by: "Dashboard User" }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        alert(`Rollback failed: ${err.detail ?? res.statusText}`)
-        return
-      }
+      await apiClient.post(`/api/rollback/${snapshotId}`, { rolled_back_by: "Dashboard User" })
       // Refresh list so decision shows "rolled_back"
       loadEntries()
-    } catch {
-      alert("Rollback failed: network error")
+    } catch (e: any) {
+      alert(`Rollback failed: ${e?.response?.data?.detail ?? "network error"}`)
     } finally {
       setRollingBack(null)
     }

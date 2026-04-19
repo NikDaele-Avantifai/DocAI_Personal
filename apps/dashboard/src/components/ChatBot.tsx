@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react"
 import { useLocation } from "react-router-dom"
 import "./ChatBot.css"
-import { API_BASE } from '@/lib/api'
+import { apiClient, API_BASE } from '@/lib/api'
 
 interface Message {
   role: "user" | "assistant"
@@ -18,8 +18,8 @@ const STARTERS = [
 function useWorkspaceStats() {
   const [stats, setStats] = useState<Record<string, number>>({})
   useEffect(() => {
-    fetch(`${API_BASE}/api/stats/`)
-      .then(r => r.json())
+    apiClient.get('/api/stats/')
+      .then(r => r.data)
       .then(d => setStats({ pages: d.pages_total ?? 0, issues: d.proposals_pending ?? 0, duplicates: 0 }))
       .catch(() => {})
   }, [])

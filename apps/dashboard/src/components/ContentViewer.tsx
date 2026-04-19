@@ -8,7 +8,7 @@ import React, {
   type ReactNode,
 } from "react"
 import "./ContentViewer.css"
-import { API_BASE } from '@/lib/api'
+import { apiClient } from '@/lib/api'
 
 // ── Exported types ─────────────────────────────────────────────────────────
 
@@ -627,14 +627,10 @@ export default function ContentViewer({
     if (dismissedKeys.has(k) || dismissingKey === k) return
     setDismissingKey(k)
     try {
-      await fetch(`${API_BASE}/api/pages/${pageId}/dismiss`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          issue_id: issue.id ?? k,
-          issue_title: issue.title,
-          exact_content: issue.exactContent ?? issue.location?.quote ?? null,
-        }),
+      await apiClient.post(`/api/pages/${pageId}/dismiss`, {
+        issue_id: issue.id ?? k,
+        issue_title: issue.title,
+        exact_content: issue.exactContent ?? issue.location?.quote ?? null,
       })
       setDismissedKeys(prev => new Set([...prev, k]))
     } catch {

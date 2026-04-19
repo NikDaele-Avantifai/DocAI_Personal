@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import "./SpaceTree.css"
-import { API_BASE } from '@/lib/api'
+import { apiClient } from '@/lib/api'
 const HEALTH_STALE_DAYS = 180
 
 export type PageNode = {
@@ -168,8 +168,8 @@ export default function SpaceTree({
   useEffect(() => {
     setLoading(true)
     setError(null)
-    fetch(`${API_BASE}/api/sync/spaces`)
-      .then(r => r.json())
+    apiClient.get('/api/sync/spaces')
+      .then(r => r.data)
       .then(data => setSpaces(data.spaces ?? []))
       .catch(() => setError("Could not reach backend. Is it running on port 8000?"))
       .finally(() => setLoading(false))
@@ -182,8 +182,8 @@ export default function SpaceTree({
     const keys = Array.from(expandedSpaces)
     Promise.all(
       keys.map(spaceKey =>
-        fetch(`${API_BASE}/api/sync/spaces/${encodeURIComponent(spaceKey)}/tree`)
-          .then(r => r.json())
+        apiClient.get(`/api/sync/spaces/${encodeURIComponent(spaceKey)}/tree`)
+          .then(r => r.data)
           .then(data => ({ spaceKey, tree: data.tree ?? [] }))
           .catch(() => ({ spaceKey, tree: [] }))
       )
@@ -210,8 +210,7 @@ export default function SpaceTree({
     if (isNowExpanded && !trees[spaceKey]) {
       setLoadingTree(spaceKey)
       try {
-        const res = await fetch(`${API_BASE}/api/sync/spaces/${encodeURIComponent(spaceKey)}/tree`)
-        const data = await res.json()
+        const data = await apiClient.get(`/api/sync/spaces/${encodeURIComponent(spaceKey)}/tree`).then(r => r.data)
         setTrees(prev => ({ ...prev, [spaceKey]: data.tree ?? [] }))
       } catch {
         // tree fetch failed; show empty

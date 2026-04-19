@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import "./DashboardPage.css"
-import { API_BASE } from '@/lib/api'
+import { apiClient } from '@/lib/api'
 
 type ActivityEntry = {
   id: string
@@ -54,8 +54,8 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/stats/`)
-      .then(r => r.json())
+    apiClient.get('/api/stats/')
+      .then(r => r.data)
       .then(setStats)
       .catch(() => setStats(null))
       .finally(() => setLoading(false))

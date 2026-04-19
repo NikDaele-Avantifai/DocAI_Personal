@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo } from "react"
 import { useNavigate } from "react-router-dom"
 import "./DuplicatesPage.css"
-import { API_BASE } from '@/lib/api'
+import { apiClient } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -426,8 +426,8 @@ export default function DuplicatesPage() {
   async function loadStatus() {
     try {
       const [statusRes, spacesRes] = await Promise.all([
-        fetch(`${API_BASE}/api/duplicates/status`).then(r => r.json()),
-        fetch(`${API_BASE}/api/sync/spaces`).then(r => r.json()),
+        apiClient.get('/api/duplicates/status').then(r => r.data),
+        apiClient.get('/api/sync/spaces').then(r => r.data),
       ])
       setStatus(statusRes)
       setSpaces(spacesRes.spaces ?? [])
@@ -441,13 +441,7 @@ export default function DuplicatesPage() {
     setEmbedError(null)
     setEmbedResult(null)
     try {
-      const url = `${API_BASE}/api/duplicates/embed-all${force ? "?force=true" : ""}`
-      const res = await fetch(url, { method: "POST" })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.detail ?? `API error ${res.status}`)
-      }
-      const data: EmbedResult = await res.json()
+      const data: EmbedResult = await apiClient.post(`/api/duplicates/embed-all${force ? "?force=true" : ""}`).then(r => r.data)
       setEmbedResult(data)
       await loadStatus()
     } catch (e) {
@@ -464,12 +458,7 @@ export default function DuplicatesPage() {
     const qs = new URLSearchParams({ threshold: String(threshold) })
     if (selectedSpace !== "__all__") qs.set("space_key", selectedSpace)
     try {
-      const res = await fetch(`${API_BASE}/api/duplicates/scan?${qs}`)
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.detail ?? `API error ${res.status}`)
-      }
-      const data = await res.json()
+      const data = await apiClient.get(`/api/duplicates/scan?${qs}`).then(r => r.data)
       setPairs(data.pairs ?? [])
     } catch (e) {
       setScanError(e instanceof Error ? e.message : "Scan failed")
@@ -484,8 +473,8 @@ export default function DuplicatesPage() {
     setLoadingContent(prev => new Set(prev).add(key))
     try {
       const [aRes, bRes] = await Promise.all([
-        fetch(`${API_BASE}/api/sync/pages/${pair.page_a.id}`).then(r => r.json()),
-        fetch(`${API_BASE}/api/sync/pages/${pair.page_b.id}`).then(r => r.json()),
+        apiClient.get(`/api/sync/pages/${pair.page_a.id}`).then(r => r.data),
+        apiClient.get(`/api/sync/pages/${pair.page_b.id}`).then(r => r.data),
       ])
       setPageContents(prev => ({
         ...prev,
@@ -506,19 +495,7 @@ export default function DuplicatesPage() {
     setProposing(key)
     setProposeError(null)
     try {
-      const res = await fetch(`${API_BASE}/api/duplicates/propose-merge`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          page_a_id: pair.page_a.id,
-          page_b_id: pair.page_b.id,
-          action,
-        }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.detail ?? `API error ${res.status}`)
-      }
+      await apiClient.post('/api/duplicates/propose-merge', { page_a_id: pair.page_a.id, page_b_id: pair.page_b.id, action })
       setProposed(prev => new Set(prev).add(key))
     } catch (e) {
       setProposeError(e instanceof Error ? e.message : "Failed to propose merge")
@@ -533,19 +510,7 @@ export default function DuplicatesPage() {
     setProposeError(null)
     setDecisionPanelPair(null)
     try {
-      const res = await fetch(`${API_BASE}/api/duplicates/propose-duplicate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          page_a_id: pair.page_a.id,
-          page_b_id: pair.page_b.id,
-          action,
-        }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.detail ?? `API error ${res.status}`)
-      }
+      await apiClient.post('/api/duplicates/propose-duplicate', { page_a_id: pair.page_a.id, page_b_id: pair.page_b.id, action })
       setProposed(prev => new Set(prev).add(key))
     } catch (e) {
       setProposeError(e instanceof Error ? e.message : "Failed to create proposal")

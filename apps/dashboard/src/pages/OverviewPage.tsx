@@ -4,7 +4,7 @@ import { AlertCircle, CheckCircle2, Folder } from "lucide-react"
 import { SkeletonRow } from "../components/Skeleton"
 import { useTour } from "../contexts/TourContext"
 import "./OverviewPage.css"
-import { API_BASE } from '@/lib/api'
+import { apiClient } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
 
 type IssueCategory = "stale" | "empty" | "no_owner" | "generic_title" | "needs_review"
@@ -126,8 +126,8 @@ export default function OverviewPage() {
   useEffect(() => {
     if (!isTokenReady) return
     Promise.all([
-      fetch(`${API_BASE}/api/stats/`).then(r => r.json()),
-      fetch(`${API_BASE}/api/sweep/latest`).then(r => r.json()).catch(() => null),
+      apiClient.get('/api/stats/').then(r => r.data),
+      apiClient.get('/api/sweep/latest').then(r => r.data).catch(() => null),
     ]).then(([s, sw]) => {
       setStats(s)
       setSweep(sw || null)
@@ -171,9 +171,9 @@ export default function OverviewPage() {
   async function runSweep() {
     setSweepLoading(true)
     try {
-      const result = await fetch(`${API_BASE}/api/sweep/run`, { method: "POST" }).then(r => r.json())
+      const result = await apiClient.post('/api/sweep/run').then(r => r.data)
       setSweep(result)
-      const newStats = await fetch(`${API_BASE}/api/stats/`).then(r => r.json())
+      const newStats = await apiClient.get('/api/stats/').then(r => r.data)
       setStats(newStats)
     } catch {}
     setSweepLoading(false)

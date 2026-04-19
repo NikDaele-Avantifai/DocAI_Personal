@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 import "./BatchPage.css"
-import { API_BASE } from '@/lib/api'
+import { apiClient } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
 
 type Space = { key: string; name: string; page_count: number }
@@ -53,8 +53,8 @@ export default function BatchPage() {
   useEffect(() => {
     if (!isTokenReady) return
     setScanState("loading_spaces")
-    fetch(`${API_BASE}/api/sync/spaces`)
-      .then(r => r.json())
+    apiClient.get('/api/sync/spaces')
+      .then(r => r.data)
       .then(data => {
         setSpaces(data.spaces ?? [])
         setScanState("ready")
@@ -66,8 +66,8 @@ export default function BatchPage() {
   useEffect(() => {
     const key = selectedSpace === "__all__" ? undefined : selectedSpace
     const qs = key ? `?space_key=${key}` : ""
-    fetch(`${API_BASE}/api/batch/rename/preview${qs}`)
-      .then(r => r.json())
+    apiClient.get(`/api/batch/rename/preview${qs}`)
+      .then(r => r.data)
       .then(data => setPageCount(data.total ?? null))
       .catch(() => setPageCount(null))
   }, [selectedSpace])
@@ -88,37 +88,23 @@ export default function BatchPage() {
     setScanMsgIdx(0)
 
     try {
-      const res = await fetch(`${API_BASE}/api/batch/rename`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          space_key: selectedSpace === "__all__" ? null : selectedSpace,
-          min_confidence: minConfidence,
-        }),
-      })
-
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        throw new Error(body.detail ?? `Server error ${res.status}`)
-      }
-
-      const data: RenameResult = await res.json()
+      const data: RenameResult = await apiClient.post('/api/batch/rename', {
+        space_key: selectedSpace === "__all__" ? null : selectedSpace,
+        min_confidence: minConfidence,
+      }).then(r => r.data)
       setResult(data)
 
       // Fetch the proposal to populate the inline preview
       if (data.proposal_ids?.length > 0) {
         try {
-          const propRes = await fetch(`${API_BASE}/api/proposals/${data.proposal_ids[0]}`)
-          if (propRes.ok) {
-            const propData = await propRes.json()
-            setPreviewRenames(propData.renames ?? [])
-          }
+          const propData = await apiClient.get(`/api/proposals/${data.proposal_ids[0]}`).then(r => r.data)
+          setPreviewRenames(propData.renames ?? [])
         } catch {/* preview is best-effort */}
       }
 
       setScanState("done")
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Scan failed")
+    } catch (e: any) {
+      setError(e?.response?.data?.detail ?? (e instanceof Error ? e.message : "Scan failed"))
       setScanState("error")
     }
   }

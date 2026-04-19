@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import "./SettingsPage.css"
-import { API_BASE } from '@/lib/api'
+import { apiClient } from '@/lib/api'
 
 type Tab = "profile" | "integrations" | "preferences" | "analysis" | "privacy" | "about"
 
@@ -195,8 +195,7 @@ function IntegrationsTab() {
   async function testConfluence() {
     setConnStatus(s => ({ ...s, confluence: "testing" }))
     try {
-      const res = await fetch(`${API_BASE}/api/confluence/test?base_url=${encodeURIComponent(form.confluenceUrl)}&email=${encodeURIComponent(form.confluenceEmail)}&api_token=${encodeURIComponent(form.confluenceToken)}`)
-      const data = await res.json()
+      const data = await apiClient.get(`/api/confluence/test?base_url=${encodeURIComponent(form.confluenceUrl)}&email=${encodeURIComponent(form.confluenceEmail)}&api_token=${encodeURIComponent(form.confluenceToken)}`).then(r => r.data)
       setConnStatus(s => ({ ...s, confluence: data.connected ? "ok" : "error" }))
     } catch {
       setConnStatus(s => ({ ...s, confluence: "error" }))
@@ -476,8 +475,8 @@ function AnalysisTab() {
 
   // Load on mount
   useEffect(() => {
-    fetch(`${API_BASE}/api/settings/analysis`)
-      .then(r => r.ok ? r.json() : null)
+    apiClient.get('/api/settings/analysis')
+      .then(r => r.data)
       .then(data => {
         if (data) setForm({ ...ANALYSIS_DEFAULTS, ...data })
       })
@@ -492,12 +491,8 @@ function AnalysisTab() {
     }
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
-      fetch(`${API_BASE}/api/settings/analysis`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      })
-        .then(r => r.ok ? r.json() : null)
+      apiClient.put('/api/settings/analysis', form)
+        .then(r => r.data)
         .then(data => {
           if (data) {
             setSaved(true)

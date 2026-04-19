@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom"
 import "./PagesPage.css"
 import SpaceTree, { type PageNode } from "../components/SpaceTree"
 import ContentViewer, { type Issue as ContentIssue } from "../components/ContentViewer"
-import { API_BASE } from '@/lib/api'
+import { apiClient } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
 
 type EditType = "restructure" | "add_summary" | "rewrite" | "remove_section" | "targeted_fix"
@@ -120,8 +120,8 @@ export default function PagesPage() {
   // Load sweep data once on mount — wait for token
   useEffect(() => {
     if (!isTokenReady) return
-    fetch(`${API_BASE}/api/sweep/latest`)
-      .then(r => r.json())
+    apiClient.get('/api/sweep/latest')
+      .then(r => r.data)
       .then(data => {
         if (!data?.at_risk_pages) return
         const flags: Record<string, string[]> = {}
@@ -144,9 +144,7 @@ export default function PagesPage() {
     setAnalyzeError(null)
 
     try {
-      const pageRes = await fetch(`${API_BASE}/api/sync/pages/${pageId}`)
-      if (!pageRes.ok) throw new Error("Could not fetch page content")
-      const pageData = await pageRes.json()
+      const pageData = await apiClient.get(`/api/sync/pages/${pageId}`).then(r => r.data)
 
       if (pageData.content) {
         setPageContents(prev => ({ ...prev, [pageId]: pageData.content }))
@@ -154,21 +152,15 @@ export default function PagesPage() {
 
       const liveVersion = pageData.version ?? selected.version
       const qs = forceRefresh ? "?force_refresh=true" : ""
-      const analyzeRes = await fetch(`${API_BASE}/api/analyze/${qs}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url:           selected.url ?? `https://confluence.page/${selected.id}`,
-          title:         selected.title,
-          content:       pageData.content ?? "",
-          last_modified: pageData.last_modified ?? selected.last_modified,
-          owner:         pageData.owner ?? selected.owner,
-          page_id:       selected.id,
-          page_version:  liveVersion,
-        }),
-      })
-      if (!analyzeRes.ok) throw new Error("Analysis failed")
-      const result: AnalysisResult = await analyzeRes.json()
+      const result: AnalysisResult = await apiClient.post(`/api/analyze/${qs}`, {
+        url:           selected.url ?? `https://confluence.page/${selected.id}`,
+        title:         selected.title,
+        content:       pageData.content ?? "",
+        last_modified: pageData.last_modified ?? selected.last_modified,
+        owner:         pageData.owner ?? selected.owner,
+        page_id:       selected.id,
+        page_version:  liveVersion,
+      }).then(r => r.data)
       setAnalyses(prev => ({ ...prev, [pageId]: result }))
       setRefreshKey(k => k + 1)
     } catch (e) {
@@ -181,61 +173,39 @@ export default function PagesPage() {
   /** Directly submit a targeted fix for a single issue — no modal. */
   async function createProposal(issue: ContentIssue): Promise<void> {
     if (!selected) return
-    const pageRes = await fetch(`${API_BASE}/api/sync/pages/${selected.id}`)
-    if (!pageRes.ok) throw new Error("Could not fetch page content")
-    const pageData = await pageRes.json()
-
-    const res = await fetch(`${API_BASE}/api/edit/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        page_id:             selected.id,
-        page_title:          selected.title,
-        content:             pageData.content ?? "",
-        page_version:        selected.version,
-        edit_type:           "targeted_fix",
-        space:               selected.space_key,
-        issue_title:         issue.title,
-        issue_description:   issue.explanation ?? issue.description ?? "",
-        issue_suggestion:    issue.suggestedFix ?? issue.suggestion,
-        issue_exact_content: issue.exactContent ?? undefined,
-      }),
+    const pageData = await apiClient.get(`/api/sync/pages/${selected.id}`).then(r => r.data)
+    await apiClient.post('/api/edit/generate', {
+      page_id:             selected.id,
+      page_title:          selected.title,
+      content:             pageData.content ?? "",
+      page_version:        selected.version,
+      edit_type:           "targeted_fix",
+      space:               selected.space_key,
+      issue_title:         issue.title,
+      issue_description:   issue.explanation ?? issue.description ?? "",
+      issue_suggestion:    issue.suggestedFix ?? issue.suggestion,
+      issue_exact_content: issue.exactContent ?? undefined,
     })
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}))
-      throw new Error(body.detail ?? `API error ${res.status}`)
-    }
   }
 
   async function proposeAll(issues: ContentIssue[]): Promise<void> {
     if (!selected) return
-    const pageRes = await fetch(`${API_BASE}/api/sync/pages/${selected.id}`)
-    if (!pageRes.ok) throw new Error("Could not fetch page content")
-    const pageData = await pageRes.json()
+    const pageData = await apiClient.get(`/api/sync/pages/${selected.id}`).then(r => r.data)
 
     const fixable = issues.filter(i => !i.needs_human_intervention)
     if (fixable.length === 0) return
 
-    // Single proposal that bundles all fixable issues
-    const res = await fetch(`${API_BASE}/api/edit/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        page_id:           selected.id,
-        page_title:        selected.title,
-        content:           pageData.content ?? "",
-        page_version:      selected.version,
-        edit_type:         "targeted_fix",
-        space:             selected.space_key,
-        issue_title:       `Fix all ${fixable.length} detected issue${fixable.length !== 1 ? "s" : ""}`,
-        issue_description: fixable.map(i => i.explanation ?? i.description ?? "").join(" | "),
-        issue_suggestion:  fixable.map(i => i.suggestedFix ?? i.suggestion).filter(Boolean).join(" | "),
-      }),
+    await apiClient.post('/api/edit/generate', {
+      page_id:           selected.id,
+      page_title:        selected.title,
+      content:           pageData.content ?? "",
+      page_version:      selected.version,
+      edit_type:         "targeted_fix",
+      space:             selected.space_key,
+      issue_title:       `Fix all ${fixable.length} detected issue${fixable.length !== 1 ? "s" : ""}`,
+      issue_description: fixable.map(i => i.explanation ?? i.description ?? "").join(" | "),
+      issue_suggestion:  fixable.map(i => i.suggestedFix ?? i.suggestion).filter(Boolean).join(" | "),
     })
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}))
-      throw new Error(body.detail ?? `API error ${res.status}`)
-    }
   }
 
   function openEditModal(initialType?: EditType) {
@@ -263,9 +233,7 @@ export default function PagesPage() {
     setEditError(null)
 
     try {
-      const pageRes = await fetch(`${API_BASE}/api/sync/pages/${selected.id}`)
-      if (!pageRes.ok) throw new Error("Could not fetch page content from Confluence")
-      const pageData = await pageRes.json()
+      const pageData = await apiClient.get(`/api/sync/pages/${selected.id}`).then(r => r.data)
 
       const fixableIssues = fixIssues
         ? (analysis?.issues ?? []).filter(i => !i.needs_human_intervention)
@@ -297,15 +265,7 @@ export default function PagesPage() {
         payload.issue_suggestion  = fixableIssues.map(i => i.suggestedFix ?? i.suggestion).filter(Boolean).join(" | ")
       }
 
-      const res = await fetch(`${API_BASE}/api/edit/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        throw new Error(body.detail ?? `API error ${res.status}`)
-      }
+      await apiClient.post('/api/edit/generate', payload)
 
       setCreatedProposalCount(1)
     } catch (e) {
@@ -470,7 +430,7 @@ export default function PagesPage() {
                         className="btn-mark-reviewed"
                         onClick={() => {
                           if (!selected) return
-                          fetch(`${API_BASE}/api/analyze/mark-reviewed/${selected.id}`, { method: "POST" })
+                          apiClient.post(`/api/analyze/mark-reviewed/${selected.id}`)
                             .then(() => analyzeSelected(true))
                         }}
                         title="Mark this page as manually reviewed and healthy">
