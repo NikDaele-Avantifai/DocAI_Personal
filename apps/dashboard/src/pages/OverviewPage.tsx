@@ -5,6 +5,7 @@ import { SkeletonRow } from "../components/Skeleton"
 import { useTour } from "../contexts/TourContext"
 import "./OverviewPage.css"
 import { API_BASE } from '@/lib/api'
+import { useAuth } from '@/contexts/AuthContext'
 
 type IssueCategory = "stale" | "empty" | "no_owner" | "generic_title" | "needs_review"
 
@@ -116,12 +117,14 @@ function calcHealthScore(stats: Stats, sweep: SweepResult | null): number {
 export default function OverviewPage() {
   const navigate = useNavigate()
   const { startTour, showWelcome, dismissWelcome } = useTour()
+  const { isTokenReady } = useAuth()
   const [stats, setStats] = useState<Stats | null>(null)
   const [sweep, setSweep] = useState<SweepResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [sweepLoading, setSweepLoading] = useState(false)
 
   useEffect(() => {
+    if (!isTokenReady) return
     Promise.all([
       fetch(`${API_BASE}/api/stats/`).then(r => r.json()),
       fetch(`${API_BASE}/api/sweep/latest`).then(r => r.json()).catch(() => null),
@@ -129,7 +132,7 @@ export default function OverviewPage() {
       setStats(s)
       setSweep(sw || null)
     }).catch(() => {}).finally(() => setLoading(false))
-  }, [])
+  }, [isTokenReady])
 
   // Immediately update health state when a proposal is applied in ApprovalsPage
   useEffect(() => {
@@ -209,7 +212,7 @@ export default function OverviewPage() {
   }, [sweep?.completed_at])
 
   const topIssues = sweep
-    ? Object.entries(sweep.issue_counts)
+    ? Object.entries(sweep.issue_counts ?? {})
         .filter(([, v]) => v > 0)
         .sort(([, a], [, b]) => b - a)
         .slice(0, 3)

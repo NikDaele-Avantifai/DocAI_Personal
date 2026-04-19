@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo } fr
 import { useNavigate } from "react-router-dom"
 import "./DuplicatesPage.css"
 import { API_BASE } from '@/lib/api'
+import { useAuth } from '@/contexts/AuthContext'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -380,6 +381,7 @@ function DecisionPanel({
 
 export default function DuplicatesPage() {
   const navigate = useNavigate()
+  const { isTokenReady } = useAuth()
 
   // Status
   const [status, setStatus] = useState<EmbedStatus | null>(null)
@@ -432,7 +434,7 @@ export default function DuplicatesPage() {
     } catch { /* silent */ }
   }
 
-  useEffect(() => { loadStatus() }, [])
+  useEffect(() => { if (isTokenReady) loadStatus() }, [isTokenReady]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function runEmbed(force = false) {
     setEmbedding(true)

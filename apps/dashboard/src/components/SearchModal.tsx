@@ -206,7 +206,7 @@ export default function SearchModal() {
             <div className="search-empty">No results for "{query}"</div>
           )}
 
-          {Object.entries(grouped).map(([type, items]) => {
+          {Object.entries(grouped ?? {}).map(([type, items]) => {
             const globalStart = results.indexOf(items[0])
             return (
               <div key={type} className="search-section">

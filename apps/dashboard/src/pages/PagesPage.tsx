@@ -4,6 +4,7 @@ import "./PagesPage.css"
 import SpaceTree, { type PageNode } from "../components/SpaceTree"
 import ContentViewer, { type Issue as ContentIssue } from "../components/ContentViewer"
 import { API_BASE } from '@/lib/api'
+import { useAuth } from '@/contexts/AuthContext'
 
 type EditType = "restructure" | "add_summary" | "rewrite" | "remove_section" | "targeted_fix"
 
@@ -59,6 +60,7 @@ function countDescendants(nodes: PageNode[]): number {
 
 export default function PagesPage() {
   const navigate = useNavigate()
+  const { isTokenReady } = useAuth()
 
   const [selected, setSelected] = useState<PageNode | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
@@ -115,8 +117,9 @@ export default function PagesPage() {
     return () => window.removeEventListener("docai:synccomplete", onSyncComplete)
   }, [])
 
-  // Load sweep data once on mount
+  // Load sweep data once on mount — wait for token
   useEffect(() => {
+    if (!isTokenReady) return
     fetch(`${API_BASE}/api/sweep/latest`)
       .then(r => r.json())
       .then(data => {
@@ -128,7 +131,7 @@ export default function PagesPage() {
         setSweepPageFlags(flags)
       })
       .catch(() => {})
-  }, [])
+  }, [isTokenReady])
 
   // ── Actions ────────────────────────────────────────────────────────────────
 
@@ -317,7 +320,7 @@ export default function PagesPage() {
   // Map of pageId → healthy boolean, derived from analysis results
   const analysisHealth = useMemo<Record<string, boolean>>(() => {
     const map: Record<string, boolean> = {}
-    for (const [id, result] of Object.entries(analyses)) {
+    for (const [id, result] of Object.entries(analyses ?? {})) {
       map[id] = result.is_healthy && result.issues.length === 0
     }
     return map

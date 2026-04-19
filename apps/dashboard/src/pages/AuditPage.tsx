@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import "./AuditPage.css"
 import { API_BASE } from '@/lib/api'
+import { useAuth } from '@/contexts/AuthContext'
 
 type AuditEntry = {
   id: string
@@ -59,6 +60,7 @@ function formatTime(iso: string | null): string {
 }
 
 export default function AuditPage() {
+  const { isTokenReady } = useAuth()
   const [entries, setEntries] = useState<AuditEntry[]>([])
   const [total, setTotal] = useState(0)
   const [filter, setFilter] = useState<"all" | "approved" | "rejected" | "applied" | "rolled_back">("all")
@@ -79,7 +81,7 @@ export default function AuditPage() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { loadEntries() }, [filter]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (isTokenReady) loadEntries() }, [filter, isTokenReady]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function doRollback(snapshotId: string) {
     setRollingBack(snapshotId)

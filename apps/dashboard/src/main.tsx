@@ -20,9 +20,8 @@ const queryClient = new QueryClient({
 })
 
 // Read Auth0 config from environment variables (set in .env)
-const AUTH0_DOMAIN   = import.meta.env.VITE_AUTH0_DOMAIN   as string | undefined
+const AUTH0_DOMAIN    = import.meta.env.VITE_AUTH0_DOMAIN    as string | undefined
 const AUTH0_CLIENT_ID = import.meta.env.VITE_AUTH0_CLIENT_ID as string | undefined
-const AUTH0_AUDIENCE  = import.meta.env.VITE_AUTH0_AUDIENCE  as string | undefined
 
 // When AUTH0_DOMAIN is not configured (local dev), skip the Auth0 wrapper so
 // the app still works without credentials.  ProtectedRoute will still render
@@ -56,7 +55,7 @@ function Root() {
       clientId={AUTH0_CLIENT_ID!}
       authorizationParams={{
         redirect_uri: window.location.origin,
-        ...(AUTH0_AUDIENCE ? { audience: AUTH0_AUDIENCE } : {}),
+        audience: import.meta.env.VITE_AUTH0_AUDIENCE,
       }}
       cacheLocation="localstorage"
       useRefreshTokens>

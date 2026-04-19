@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import "./ApprovalsPage.css"
 import { API_BASE } from '@/lib/api'
+import { useAuth } from '@/contexts/AuthContext'
 
 type DiffLine = {
   type: "add" | "remove" | "context" | "hunk"
@@ -101,6 +102,7 @@ const ACTION_STYLE: Record<string, { color: string; bg: string }> = {
 type NormalisedProposal = ReturnType<typeof normalise>
 
 export default function ApprovalsPage() {
+  const { isTokenReady } = useAuth()
   const [proposals, setProposals] = useState<NormalisedProposal[]>([])
   const [selected, setSelected] = useState<NormalisedProposal | null>(null)
   const [filter, setFilter] = useState<"pending" | "all" | "approved" | "rejected">("pending")
@@ -128,8 +130,9 @@ export default function ApprovalsPage() {
   const [pageContents, setPageContents] = useState<Record<string, string>>({})
   const [loadingContent, setLoadingContent] = useState<Set<string>>(new Set())
 
-  // Load proposals from API on mount
+  // Load proposals from API on mount — wait for token
   useEffect(() => {
+    if (!isTokenReady) return
     fetch(`${API_BASE}/api/proposals/`)
       .then(r => r.json())
       .then(data => {
@@ -137,7 +140,7 @@ export default function ApprovalsPage() {
         setProposals(apiProposals)
       })
       .catch(() => {/* backend unavailable */})
-  }, [])
+  }, [isTokenReady])
 
   const filtered = proposals.filter(p =>
     (filter === "all" || p.status === filter) &&

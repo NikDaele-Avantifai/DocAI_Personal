@@ -2,6 +2,7 @@ import { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 import "./BatchPage.css"
 import { API_BASE } from '@/lib/api'
+import { useAuth } from '@/contexts/AuthContext'
 
 type Space = { key: string; name: string; page_count: number }
 
@@ -35,6 +36,7 @@ const SCAN_MESSAGES = [
 
 export default function BatchPage() {
   const navigate = useNavigate()
+  const { isTokenReady } = useAuth()
 
   const [scanState, setScanState] = useState<ScanState>("idle")
   const [spaces, setSpaces] = useState<Space[]>([])
@@ -47,8 +49,9 @@ export default function BatchPage() {
   const [previewRenames, setPreviewRenames] = useState<RenamePreviewItem[]>([])
   const [previewOpen, setPreviewOpen] = useState(false)
 
-  // Load synced spaces on mount
+  // Load synced spaces on mount — wait for token
   useEffect(() => {
+    if (!isTokenReady) return
     setScanState("loading_spaces")
     fetch(`${API_BASE}/api/sync/spaces`)
       .then(r => r.json())
@@ -57,7 +60,7 @@ export default function BatchPage() {
         setScanState("ready")
       })
       .catch(() => setScanState("ready"))
-  }, [])
+  }, [isTokenReady])
 
   // Update page count when space selection changes
   useEffect(() => {
