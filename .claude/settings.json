@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -rn \"useEffect\\\\|isTokenReady\\\\|fetch\\(\\\\`\\\\${API\" /Users/nikolaidaelemans/Documents/docai/apps/dashboard/src/pages/DuplicatesPage.tsx)"
+    ]
+  }
+}

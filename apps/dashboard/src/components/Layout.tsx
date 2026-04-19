@@ -50,7 +50,7 @@ export default function Layout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const profileRef = useRef<HTMLDivElement>(null)
   const { isDemoMode } = useTour()
-  const { user, logout } = useAuth()
+  const { user, logout, isTokenReady } = useAuth()
 
   function handleSignOut() {
     if (import.meta.env.VITE_AUTH0_DOMAIN) {
@@ -70,21 +70,23 @@ export default function Layout() {
   const initials = userName.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2) || "U"
 
   useEffect(() => {
-    authFetch(`${API_BASE}/api/stats/`)
-      .then(r => r.json())
-      .then(d => {
-        setPendingCount(d.proposals_pending ?? 0)
-        setLastSync(d.last_sync ?? null)
-      })
-      .catch(() => {})
+    if (isTokenReady) {
+      authFetch(`${API_BASE}/api/stats/`)
+        .then(r => r.json())
+        .then(d => {
+          setPendingCount(d.proposals_pending ?? 0)
+          setLastSync(d.last_sync ?? null)
+        })
+        .catch(() => {})
+    }
 
-    // Load notification count from localStorage
+    // Load notification count from localStorage (no token needed)
     try {
       const notifs = JSON.parse(localStorage.getItem("docai_notifications") || "[]")
       const unread = notifs.filter((n: any) => !n.read).length
       setNotifCount(unread)
     } catch {}
-  }, [location.pathname])
+  }, [location.pathname, isTokenReady])
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
