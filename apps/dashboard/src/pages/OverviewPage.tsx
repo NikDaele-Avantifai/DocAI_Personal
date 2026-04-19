@@ -374,7 +374,7 @@ export default function OverviewPage() {
             {sweep && !sweepLoading && (
               <div className="ov-issue-breakdown">
                 {ISSUE_ORDER.map(cat => {
-                  const count = sweep.issue_counts[cat] ?? 0
+                  const count = (sweep.issue_counts ?? {})[cat] ?? 0
                   const pct = sweep.pages_scanned > 0
                     ? Math.max((count / sweep.pages_scanned) * 100, count > 0 ? 3 : 0)
                     : 0
@@ -424,8 +424,8 @@ export default function OverviewPage() {
               <div className="ov-risk-list">
                 {sweep.at_risk_pages.slice(0, 8).map(page => {
                   const isFolder = page.is_folder ?? false
-                  const isEmpty = !isFolder && page.flags.includes("empty")
-                  const visibleFlags = page.flags.filter(f =>
+                  const isEmpty = !isFolder && (page.flags ?? []).includes("empty")
+                  const visibleFlags = (page.flags ?? []).filter(f =>
                     isFolder ? f === "generic_title" : true
                   )
                   return (
