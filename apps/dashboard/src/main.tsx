@@ -57,8 +57,10 @@ function Root() {
         redirect_uri: window.location.origin,
         audience: import.meta.env.VITE_AUTH0_AUDIENCE,
       }}
-      cacheLocation="localstorage"
-      useRefreshTokens>
+      cacheLocation="memory"
+      useRefreshTokens={true}
+      useRefreshTokensFallback={true}
+      >
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <App />
