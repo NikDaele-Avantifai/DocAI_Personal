@@ -4,54 +4,67 @@ import { useAuth0 } from "@auth0/auth0-react"
 import "./LoginPage.css"
 
 const AUTH0_CONFIGURED = !!import.meta.env.VITE_AUTH0_DOMAIN
+const AUTH0_DOMAIN = import.meta.env.VITE_AUTH0_DOMAIN
+const AUTH0_CLIENT_ID = import.meta.env.VITE_AUTH0_CLIENT_ID
 
 function Auth0LoginPage() {
-  const { loginWithRedirect, isAuthenticated, isLoading, logout } = useAuth0()
+  const { loginWithRedirect, isAuthenticated, isLoading } = useAuth0()
   const navigate = useNavigate()
   const [accessError, setAccessError] = useState<string | null>(null)
-  // Ref prevents the effect from running more than once
-  const handledRef = useRef(false)
+  const processedRef = useRef(false)
 
   useEffect(() => {
-    if (handledRef.current) return
-    handledRef.current = true
+    if (processedRef.current) return
+    processedRef.current = true
 
-    // Phase 2: returned from Auth0 logout, show persisted error
-    const storedError = sessionStorage.getItem('docai_auth_error')
-    if (storedError) {
-      setAccessError(storedError)
-      sessionStorage.removeItem('docai_auth_error')
-      window.history.replaceState({}, '', '/login')
-      return
-    }
-
-    // Phase 1: Auth0 redirected back with error in URL
     const params = new URLSearchParams(window.location.search)
     const error = params.get('error')
     const errorDescription = params.get('error_description')
 
-    if (error) {
-      const message = errorDescription 
-        ?? 'Access denied. Contact Avantifai to request access.'
-      sessionStorage.setItem('docai_auth_error', message)
-      // Use window.location directly — avoids logout() reference instability
-      const returnTo = encodeURIComponent(window.location.origin + '/login')
-      window.location.href = 
-        `https://${import.meta.env.VITE_AUTH0_DOMAIN}/v2/logout?` +
-        `client_id=${import.meta.env.VITE_AUTH0_CLIENT_ID}&` +
-        `returnTo=${returnTo}`
-    }
-  }, []) // Empty deps — run once only, no logout reference needed
+    // Clean URL immediately regardless
+    window.history.replaceState({}, '', '/login')
 
+    // Check for stored error first (phase 2 — returned from logout)
+    const storedError = sessionStorage.getItem('docai_auth_error')
+    if (storedError) {
+      setAccessError(storedError)
+      sessionStorage.removeItem('docai_auth_error')
+      return // Stop here — don't do anything else
+    }
+
+    // Phase 1 — Auth0 returned an error
+    if (error === 'access_denied') {
+      const message = errorDescription
+        ?? 'Access not authorized. Contact Avantifai to request access.'
+      sessionStorage.setItem('docai_auth_error', message)
+
+      // Build logout URL with federated=true to kill Google session too
+      const returnTo = encodeURIComponent(window.location.origin + '/login')
+      const logoutUrl =
+        `https://${AUTH0_DOMAIN}/v2/logout` +
+        `?client_id=${AUTH0_CLIENT_ID}` +
+        `&returnTo=${returnTo}` +
+        `&federated` // ← kills the Google SSO session too
+
+      window.location.replace(logoutUrl)
+    }
+  }, [])
+
+  // Only redirect to overview if authenticated AND no error pending
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      navigate('/overview', { replace: true })
+      const storedError = sessionStorage.getItem('docai_auth_error')
+      if (!storedError) {
+        navigate('/overview', { replace: true })
+      }
     }
   }, [isAuthenticated, isLoading, navigate])
 
   function handleLogin() {
     loginWithRedirect({
-      authorizationParams: { prompt: 'select_account' }
+      authorizationParams: {
+        prompt: 'login', // Force full login, not silent re-auth
+      }
     })
   }
 
@@ -110,10 +123,14 @@ function BypassLoginPage() {
         <p className="login-tagline">
           Enterprise document intelligence<br />for Confluence workspaces
         </p>
-        <button className="login-btn" onClick={() => window.location.href = "/"}>
+        <button
+          className="login-btn"
+          onClick={() => window.location.href = "/"}>
           Enter as Dev User
         </button>
-        <p className="login-footer">DocAI by Avantifai · Enterprise document intelligence</p>
+        <p className="login-footer">
+          DocAI by Avantifai · Enterprise document intelligence
+        </p>
       </div>
     </div>
   )

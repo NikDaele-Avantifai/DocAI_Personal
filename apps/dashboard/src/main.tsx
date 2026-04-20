@@ -11,7 +11,6 @@ const queryClient = new QueryClient({
     queries: {
       staleTime: 30_000,
       retry: (failureCount, error: any) => {
-        // Never retry on 401 — it causes redirect loops
         if (error?.response?.status === 401) return false
         return failureCount < 1
       },
@@ -19,27 +18,16 @@ const queryClient = new QueryClient({
   },
 })
 
-// Read Auth0 config from environment variables (set in .env)
-const AUTH0_DOMAIN    = import.meta.env.VITE_AUTH0_DOMAIN    as string | undefined
+const AUTH0_DOMAIN = import.meta.env.VITE_AUTH0_DOMAIN as string | undefined
 const AUTH0_CLIENT_ID = import.meta.env.VITE_AUTH0_CLIENT_ID as string | undefined
-
-// When AUTH0_DOMAIN is not configured (local dev), skip the Auth0 wrapper so
-// the app still works without credentials.  ProtectedRoute will still render
-// normally; it only redirects to /login when isAuthenticated === false, which
-// never happens in dev-bypass mode (no auth provider → useAuth0 returns
-// isAuthenticated=false, so we need a thin shim — handled via bypassAuth flag).
 const bypassAuth = !AUTH0_DOMAIN || !AUTH0_CLIENT_ID
 
 if (bypassAuth) {
-  console.info(
-    "[DocAI] Auth0 not configured (VITE_AUTH0_DOMAIN / VITE_AUTH0_CLIENT_ID missing). " +
-    "Running in dev-bypass mode — all routes are accessible without login.",
-  )
+  console.info("[DocAI] Running in dev-bypass mode.")
 }
 
 function Root() {
   if (bypassAuth) {
-    // No Auth0 → render the app directly; backend also skips auth in this mode
     return (
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
@@ -57,10 +45,10 @@ function Root() {
         redirect_uri: window.location.origin,
         audience: import.meta.env.VITE_AUTH0_AUDIENCE,
       }}
-      cacheLocation="memory"
+      cacheLocation="localstorage"
       useRefreshTokens={true}
-      useRefreshTokensFallback={true}
-      >
+      skipRedirectCallback={window.location.pathname === '/login'}
+    >
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <App />
