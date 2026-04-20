@@ -11,6 +11,10 @@ function Auth0LoginPage() {
   const { loginWithRedirect, isAuthenticated, isLoading } = useAuth0()
   const navigate = useNavigate()
 
+  const params = new URLSearchParams(window.location.search)
+  const errorDescription = params.get('error_description')
+  const error = params.get('error')
+
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
       navigate("/overview", { replace: true })
@@ -18,7 +22,11 @@ function Auth0LoginPage() {
   }, [isAuthenticated, isLoading, navigate])
 
   function handleLogin() {
-    loginWithRedirect()
+    loginWithRedirect({
+      authorizationParams: {
+        prompt: 'select_account'
+      }
+    })
   }
 
   if (isLoading) {
@@ -36,6 +44,12 @@ function Auth0LoginPage() {
         <p className="login-tagline">
           Enterprise document intelligence<br />for Confluence workspaces
         </p>
+
+        {error && (
+          <div className="login-error">
+            {errorDescription ?? 'Access denied. Contact Avantifai to request access.'}
+          </div>
+        )}
 
         <button className="login-btn" onClick={handleLogin}>
           Continue with Google
