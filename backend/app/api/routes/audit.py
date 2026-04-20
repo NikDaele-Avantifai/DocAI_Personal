@@ -3,6 +3,8 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
+from app.core.workspace import get_current_workspace
+from app.models.workspace import Workspace
 from app.models.audit import AuditEntry
 
 router = APIRouter()
@@ -32,12 +34,17 @@ async def list_audit_entries(
     limit: int = Query(50, le=200),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
 ):
-    q = select(AuditEntry).order_by(AuditEntry.updated_at.desc())
+    q = select(AuditEntry).where(
+        AuditEntry.workspace_id == workspace.id
+    ).order_by(AuditEntry.updated_at.desc())
     if decision:
         q = q.where(AuditEntry.decision == decision)
 
-    total_q = select(func.count()).select_from(AuditEntry)
+    total_q = select(func.count()).select_from(AuditEntry).where(
+        AuditEntry.workspace_id == workspace.id
+    )
     if decision:
         total_q = total_q.where(AuditEntry.decision == decision)
 

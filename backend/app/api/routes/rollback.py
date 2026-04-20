@@ -6,12 +6,37 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.config import settings
+from app.core.workspace import get_current_workspace
+from app.core.encryption import decrypt_token
 from app.db.database import get_db
+from app.models.workspace import Workspace
 from app.models.snapshot import Snapshot
 from app.models.audit import AuditEntry
 from app.services.confluence_service import ConfluenceService
 
 router = APIRouter()
+
+
+def _build_confluence(workspace: Workspace) -> ConfluenceService:
+    base_url = workspace.confluence_base_url or settings.atlassian_base_url
+    email = workspace.confluence_email or settings.atlassian_mail
+    api_token: str | None = None
+
+    if workspace.confluence_api_token_enc:
+        try:
+            api_token = decrypt_token(workspace.confluence_api_token_enc)
+        except Exception:
+            api_token = None
+
+    if not api_token:
+        api_token = settings.atlassian_api_token
+
+    if not api_token or not email:
+        raise HTTPException(
+            status_code=503,
+            detail="Confluence credentials not configured. Set credentials in Settings.",
+        )
+    return ConfluenceService(base_url=base_url, api_token=api_token, email=email)
 
 
 class RollbackRequest(BaseModel):
@@ -23,6 +48,7 @@ async def rollback_change(
     snapshot_id: str,
     body: RollbackRequest,
     db: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
 ):
     """
     Restore a Confluence page to its pre-change state using a stored snapshot.
@@ -31,34 +57,34 @@ async def rollback_change(
     snapshot = await db.get(Snapshot, snapshot_id)
     if not snapshot:
         raise HTTPException(status_code=404, detail="Snapshot not found")
+    if snapshot.workspace_id != workspace.id:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
     if snapshot.rolled_back:
         raise HTTPException(status_code=400, detail="This change has already been rolled back")
 
-    if not settings.atlassian_api_token or not settings.atlassian_mail:
-        raise HTTPException(
-            status_code=503,
-            detail="Atlassian credentials not configured. Set ATLASSIAN_API_TOKEN and ATLASSIAN_MAIL in backend/.env",
-        )
-
-    svc = ConfluenceService(
-        base_url=settings.atlassian_base_url,
-        api_token=settings.atlassian_api_token,
-        email=settings.atlassian_mail,
-    )
+    svc = _build_confluence(workspace)
 
     try:
         if snapshot.action == "rename":
-            # Restore old title via v2 API
             await svc.rename_page_v2(snapshot.page_id, snapshot.page_title_before)
 
         elif snapshot.action == "consolidate-pages":
-            # Page is in Confluence trash — normal get_page 404s.
-            # Fetch via ?status=trashed to get the current version and space key.
             import httpx as _httpx
+            base_url = workspace.confluence_base_url or settings.atlassian_base_url
+            email = workspace.confluence_email or settings.atlassian_mail
+            api_token: str | None = None
+            if workspace.confluence_api_token_enc:
+                try:
+                    api_token = decrypt_token(workspace.confluence_api_token_enc)
+                except Exception:
+                    api_token = None
+            if not api_token:
+                api_token = settings.atlassian_api_token
+
             async with _httpx.AsyncClient(timeout=20.0) as _client:
                 trashed_resp = await _client.get(
-                    f"{settings.atlassian_base_url.rstrip('/')}/wiki/rest/api/content/{snapshot.page_id}",
-                    auth=(settings.atlassian_mail, settings.atlassian_api_token),
+                    f"{base_url.rstrip('/')}/wiki/rest/api/content/{snapshot.page_id}",
+                    auth=(email, api_token),
                     params={"status": "trashed", "expand": "version,space"},
                     headers={"Accept": "application/json"},
                 )
@@ -83,8 +109,6 @@ async def rollback_change(
             current = await svc.get_page(snapshot.page_id)
             current_version = current.get("version", {}).get("number", 1)
 
-            # For renames the body was untouched — restore original title, keep current body
-            # For content edits — restore original title + original body
             if snapshot.page_body_before is None:
                 restore_body = current.get("body", {}).get("storage", {}).get("value", "")
             else:
@@ -102,14 +126,13 @@ async def rollback_change(
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Confluence API error: {exc}")
 
-    # Mark snapshot as rolled back
     snapshot.rolled_back = True
     snapshot.rolled_back_at = datetime.now(timezone.utc)
     snapshot.rolled_back_by = body.rolled_back_by
 
-    # Update audit entry decision to "rolled_back"
     stmt = pg_insert(AuditEntry).values(
         id=snapshot.proposal_id,
+        workspace_id=workspace.id,
         page_id=snapshot.page_id,
         page_title=snapshot.page_title_before,
         space_key=None,

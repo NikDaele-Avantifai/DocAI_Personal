@@ -1,10 +1,15 @@
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from sqlalchemy import select as sa_select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.workspace import get_current_workspace
+from app.core.encryption import decrypt_token
 from app.db.database import get_db, AsyncSessionLocal
+from app.models.workspace import Workspace
+from app.models.page import Page
 from app.services.confluence_service import ConfluenceService
 from app.services.embedding_service import EmbeddingService
 from app.services.sync_service import SyncService
@@ -15,45 +20,59 @@ _embed_svc = EmbeddingService()
 router = APIRouter()
 
 
-def _get_confluence() -> ConfluenceService:
-    """Build a ConfluenceService from server-side credentials in config."""
-    if not settings.atlassian_api_token or not settings.atlassian_mail:
+def _build_confluence(workspace: Workspace) -> ConfluenceService:
+    """Build a ConfluenceService from workspace credentials, falling back to settings."""
+    base_url = workspace.confluence_base_url or settings.atlassian_base_url
+    email = workspace.confluence_email or settings.atlassian_mail
+    api_token: str | None = None
+
+    if workspace.confluence_api_token_enc:
+        try:
+            api_token = decrypt_token(workspace.confluence_api_token_enc)
+        except Exception:
+            api_token = None
+
+    if not api_token:
+        api_token = settings.atlassian_api_token
+
+    if not api_token or not email:
         raise HTTPException(
             status_code=503,
             detail=(
-                "Atlassian credentials not configured. "
-                "Set ATLASSIAN_API_TOKEN and ATLASSIAN_MAIL in backend/.env"
+                "Confluence credentials not configured. "
+                "Set credentials in Settings or via ATLASSIAN_API_TOKEN and ATLASSIAN_MAIL in backend/.env"
             ),
         )
-    return ConfluenceService(
-        base_url=settings.atlassian_base_url,
-        api_token=settings.atlassian_api_token,
-        email=settings.atlassian_mail,
-    )
+    return ConfluenceService(base_url=base_url, api_token=api_token, email=email)
 
 
-async def _background_embed() -> None:
+async def _background_embed(workspace_id: str) -> None:
     """Fetch content for any un-fetched pages and embed them. Runs after sync."""
-    confluence_svc = None
-    if settings.atlassian_api_token and settings.atlassian_mail:
-        confluence_svc = ConfluenceService(
-            base_url=settings.atlassian_base_url,
-            api_token=settings.atlassian_api_token,
-            email=settings.atlassian_mail,
-        )
     async with AsyncSessionLocal() as session:
         try:
-            from sqlalchemy import select as sa_select
-            from app.models.page import Page
+            workspace = await session.get(Workspace, workspace_id)
+            confluence_svc: ConfluenceService | None = None
+
+            if workspace:
+                try:
+                    confluence_svc = _build_confluence_from_values(
+                        base_url=workspace.confluence_base_url or settings.atlassian_base_url,
+                        email=workspace.confluence_email or settings.atlassian_mail,
+                        api_token_enc=workspace.confluence_api_token_enc,
+                    )
+                except Exception:
+                    confluence_svc = None
+
             rows = (
                 await session.execute(
                     sa_select(Page.id, Page.title).where(
+                        Page.workspace_id == workspace_id,
                         (Page.content.is_(None)) | (Page.content == "")
                     )
                 )
             ).all()
             if confluence_svc:
-                sync_svc = SyncService(session=session, confluence=confluence_svc)
+                sync_svc = SyncService(session=session, confluence=confluence_svc, workspace_id=workspace_id)
                 for page_id, page_title in [(r.id, r.title) for r in rows]:
                     try:
                         await sync_svc.get_page_with_content(page_id, embedding_svc=_embed_svc)
@@ -64,16 +83,36 @@ async def _background_embed() -> None:
             log.error("background_embed: unexpected error: %s", exc)
 
 
+def _build_confluence_from_values(
+    base_url: str,
+    email: str,
+    api_token_enc: str | None,
+) -> ConfluenceService:
+    """Helper for building ConfluenceService from raw values (used in background tasks)."""
+    api_token: str | None = None
+    if api_token_enc:
+        try:
+            api_token = decrypt_token(api_token_enc)
+        except Exception:
+            api_token = None
+    if not api_token:
+        api_token = settings.atlassian_api_token
+    if not api_token or not email:
+        raise ValueError("Confluence credentials not available")
+    return ConfluenceService(base_url=base_url, api_token=api_token, email=email)
+
+
 @router.post("/spaces")
 async def sync_all_spaces(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
 ):
     """Trigger a full sync of all Confluence spaces the configured user can access."""
     try:
-        svc = SyncService(session=db, confluence=_get_confluence())
+        svc = SyncService(session=db, confluence=_build_confluence(workspace), workspace_id=workspace.id)
         result = await svc.sync_all_spaces()
-        background_tasks.add_task(_background_embed)
+        background_tasks.add_task(_background_embed, workspace.id)
         return result
     except HTTPException:
         raise
@@ -86,12 +125,13 @@ async def sync_single_space(
     space_key: str,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
 ):
     """Trigger a sync of a single Confluence space."""
     try:
-        svc = SyncService(session=db, confluence=_get_confluence())
+        svc = SyncService(session=db, confluence=_build_confluence(workspace), workspace_id=workspace.id)
         result = await svc.sync_space(space_key)
-        background_tasks.add_task(_background_embed)
+        background_tasks.add_task(_background_embed, workspace.id)
         return result
     except HTTPException:
         raise
@@ -100,10 +140,13 @@ async def sync_single_space(
 
 
 @router.get("/spaces")
-async def list_synced_spaces(db: AsyncSession = Depends(get_db)):
+async def list_synced_spaces(
+    db: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+):
     """Return all spaces that have been synced to the local database."""
     try:
-        svc = SyncService(session=db, confluence=_get_confluence())
+        svc = SyncService(session=db, confluence=_build_confluence(workspace), workspace_id=workspace.id)
         spaces = await svc.get_all_synced_spaces()
         return {"spaces": spaces, "total": len(spaces)}
     except HTTPException:
@@ -116,10 +159,11 @@ async def list_synced_spaces(db: AsyncSession = Depends(get_db)):
 async def get_space_tree(
     space_key: str,
     db: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
 ):
     """Return the full nested page tree for a synced space."""
     try:
-        svc = SyncService(session=db, confluence=_get_confluence())
+        svc = SyncService(session=db, confluence=_build_confluence(workspace), workspace_id=workspace.id)
         tree = await svc.get_space_tree(space_key)
         return {"space_key": space_key, "tree": tree, "total": len(tree)}
     except HTTPException:
@@ -129,16 +173,14 @@ async def get_space_tree(
 
 
 @router.get("/debug/tree/{space_key}")
-async def debug_tree(space_key: str, db: AsyncSession = Depends(get_db)):
-    """
-    Debug endpoint — dumps raw page rows for a space so parent/child IDs can be inspected.
-    Returns every page's id, title, and parent_id as stored in the DB.
-    """
-    from sqlalchemy import select
-    from app.models.page import Page
+async def debug_tree(
+    space_key: str,
+    db: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+):
     result = await db.execute(
-        select(Page.id, Page.title, Page.parent_id, Page.space_key)
-        .where(Page.space_key == space_key)
+        sa_select(Page.id, Page.title, Page.parent_id, Page.space_key)
+        .where(Page.workspace_id == workspace.id, Page.space_key == space_key)
         .order_by(Page.title)
     )
     rows = result.all()
@@ -162,10 +204,11 @@ async def debug_tree(space_key: str, db: AsyncSession = Depends(get_db)):
 async def get_page_with_content(
     page_id: str,
     db: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
 ):
     """Return a single page with full body content, fetched live from Confluence."""
     try:
-        svc = SyncService(session=db, confluence=_get_confluence())
+        svc = SyncService(session=db, confluence=_build_confluence(workspace), workspace_id=workspace.id)
         return await svc.get_page_with_content(page_id)
     except HTTPException:
         raise

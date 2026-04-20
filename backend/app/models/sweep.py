@@ -10,6 +10,7 @@ class WorkspaceSweep(Base):
     __tablename__ = "workspace_sweeps"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=datetime.utcnow
     )

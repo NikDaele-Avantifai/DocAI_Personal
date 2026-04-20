@@ -9,7 +9,10 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy import select
 
 from app.core.config import settings
+from app.core.workspace import get_current_workspace
+from app.core.encryption import decrypt_token
 from app.db.database import get_db
+from app.models.workspace import Workspace
 from app.models.audit import AuditEntry
 from app.models.page import Page
 from app.models.snapshot import Snapshot
@@ -19,6 +22,29 @@ router = APIRouter()
 
 # In-memory store for now — replace with PostgreSQL in next phase
 _proposals: dict[str, dict] = {}
+
+
+def _build_confluence(workspace: Workspace) -> ConfluenceService:
+    """Build ConfluenceService from workspace credentials, falling back to settings."""
+    base_url = workspace.confluence_base_url or settings.atlassian_base_url
+    email = workspace.confluence_email or settings.atlassian_mail
+    api_token: str | None = None
+
+    if workspace.confluence_api_token_enc:
+        try:
+            api_token = decrypt_token(workspace.confluence_api_token_enc)
+        except Exception:
+            api_token = None
+
+    if not api_token:
+        api_token = settings.atlassian_api_token
+
+    if not api_token or not email:
+        raise HTTPException(
+            status_code=503,
+            detail="Confluence credentials not configured. Set credentials in Settings.",
+        )
+    return ConfluenceService(base_url=base_url, api_token=api_token, email=email)
 
 
 class CreateProposalRequest(BaseModel):
@@ -38,18 +64,28 @@ class ReviewProposalRequest(BaseModel):
 
 
 @router.get("/")
-async def list_proposals(status: str | None = None):
-    proposals = list(_proposals.values())
+async def list_proposals(
+    status: str | None = None,
+    workspace: Workspace = Depends(get_current_workspace),
+):
+    proposals = [
+        p for p in _proposals.values()
+        if p.get("workspace_id") == workspace.id
+    ]
     if status:
         proposals = [p for p in proposals if p["status"] == status]
     return {"proposals": proposals, "total": len(proposals)}
 
 
 @router.post("/")
-async def create_proposal(body: CreateProposalRequest):
+async def create_proposal(
+    body: CreateProposalRequest,
+    workspace: Workspace = Depends(get_current_workspace),
+):
     proposal_id = str(uuid.uuid4())
     proposal = {
         "id": proposal_id,
+        "workspace_id": workspace.id,
         **body.model_dump(),
         "status": "pending",
         "created_at": datetime.utcnow().isoformat(),
@@ -65,11 +101,14 @@ async def review_proposal(
     proposal_id: str,
     body: ReviewProposalRequest,
     db: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
 ):
     if proposal_id not in _proposals:
         raise HTTPException(status_code=404, detail="Proposal not found")
 
     proposal = _proposals[proposal_id]
+    if proposal.get("workspace_id") != workspace.id:
+        raise HTTPException(status_code=404, detail="Proposal not found")
     if proposal["status"] != "pending":
         raise HTTPException(status_code=400, detail="Proposal already reviewed")
 
@@ -82,6 +121,7 @@ async def review_proposal(
     # Write to audit log
     stmt = pg_insert(AuditEntry).values(
         id=proposal_id,
+        workspace_id=workspace.id,
         page_id=proposal.get("source_page_id", ""),
         page_title=proposal.get("source_page_title", "Unknown Page"),
         space_key=proposal.get("space_key"),
@@ -101,10 +141,16 @@ async def review_proposal(
 
 
 @router.get("/{proposal_id}")
-async def get_proposal(proposal_id: str):
+async def get_proposal(
+    proposal_id: str,
+    workspace: Workspace = Depends(get_current_workspace),
+):
     if proposal_id not in _proposals:
         raise HTTPException(status_code=404, detail="Proposal not found")
-    return _proposals[proposal_id]
+    proposal = _proposals[proposal_id]
+    if proposal.get("workspace_id") != workspace.id:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    return proposal
 
 
 class ApplyProposalRequest(BaseModel):
@@ -117,32 +163,21 @@ async def apply_proposal(
     proposal_id: str,
     body: ApplyProposalRequest,
     db: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
 ):
-    """
-    Apply an approved proposal to Confluence using server-side credentials from config.
-    If content_override is provided, it is used instead of the AI-generated new_content.
-    """
     if proposal_id not in _proposals:
         raise HTTPException(status_code=404, detail="Proposal not found")
 
     proposal = _proposals[proposal_id]
+    if proposal.get("workspace_id") != workspace.id:
+        raise HTTPException(status_code=404, detail="Proposal not found")
     if proposal["status"] not in ("approved", "pending"):
         raise HTTPException(
             status_code=400,
             detail=f"Cannot apply a proposal with status '{proposal['status']}'",
         )
 
-    if not settings.atlassian_api_token or not settings.atlassian_mail:
-        raise HTTPException(
-            status_code=503,
-            detail="Atlassian credentials not configured. Set ATLASSIAN_API_TOKEN and ATLASSIAN_MAIL in backend/.env",
-        )
-
-    svc = ConfluenceService(
-        base_url=settings.atlassian_base_url,
-        api_token=settings.atlassian_api_token,
-        email=settings.atlassian_mail,
-    )
+    svc = _build_confluence(workspace)
 
     action = proposal.get("action")
     page_id = proposal["source_page_id"]
@@ -150,18 +185,16 @@ async def apply_proposal(
 
     try:
         if action == "archive":
-            # Archives are not automatically reversible — no snapshot
             await svc.archive_page(page_id)
 
         elif action == "remove-block":
-            # Duplication proposal: remove duplicate content from the non-recommended page
             recommendation = proposal.get("recommendation", "keep-pageA")
             page_a_data = proposal.get("pageA", {})
             page_b_data = proposal.get("pageB", {})
             non_rec = page_b_data if recommendation == "keep-pageA" else page_a_data
             non_rec_id = non_rec.get("id", page_id)
             dup_content = non_rec.get("duplicateContent", "")
-            page_id = non_rec_id  # override for audit/snapshot
+            page_id = non_rec_id
 
             current = await svc.get_page(non_rec_id)
             original_title = current.get("title", proposal.get("source_page_title", ""))
@@ -171,6 +204,7 @@ async def apply_proposal(
             new_body = original_body.replace(dup_content, "", 1) if dup_content and dup_content in original_body else original_body
 
             snap = Snapshot(
+                workspace_id=workspace.id,
                 id=str(uuid.uuid4()),
                 proposal_id=proposal_id,
                 page_id=non_rec_id,
@@ -187,24 +221,22 @@ async def apply_proposal(
             await svc.update_page(non_rec_id, original_title, new_body, original_ver, "storage")
 
         elif action == "consolidate-pages":
-            # Duplication proposal: archive the non-recommended page
             recommendation = proposal.get("recommendation", "keep-pageA")
             page_a_data = proposal.get("pageA", {})
             page_b_data = proposal.get("pageB", {})
             non_rec = page_b_data if recommendation == "keep-pageA" else page_a_data
             non_rec_id = non_rec.get("id", page_id)
-            page_id = non_rec_id  # override for audit/snapshot
+            page_id = non_rec_id
 
-            # Snapshot content before archiving so rollback is possible
             current = await svc.get_page(non_rec_id)
             original_title = current.get("title", non_rec.get("title", ""))
             original_body = current.get("body", {}).get("storage", {}).get("value", "")
             original_ver = current.get("version", {}).get("number", 1)
             original_space = current.get("space", {}).get("key", "")
-            # Store space_key for rollback
             proposal.setdefault("_archived_space_key", original_space)
 
             snap = Snapshot(
+                workspace_id=workspace.id,
                 id=str(uuid.uuid4()),
                 proposal_id=proposal_id,
                 page_id=non_rec_id,
@@ -225,19 +257,19 @@ async def apply_proposal(
             if not new_title:
                 raise HTTPException(status_code=400, detail="No suggested title found on this proposal.")
 
-            # Fetch current state for snapshot
             current = await svc.get_page(page_id)
             original_title = current.get("title", proposal["source_page_title"])
             original_body  = current.get("body", {}).get("storage", {}).get("value", "")
             original_ver   = current.get("version", {}).get("number", 1)
 
             snap = Snapshot(
+                workspace_id=workspace.id,
                 id=str(uuid.uuid4()),
                 proposal_id=proposal_id,
                 page_id=page_id,
                 action=action,
                 page_title_before=original_title,
-                page_body_before=None,       # body is untouched by rename
+                page_body_before=None,
                 page_version_before=original_ver,
                 applied_by=body.applied_by,
                 applied_at=datetime.now(timezone.utc),
@@ -245,7 +277,6 @@ async def apply_proposal(
             db.add(snap)
             snapshot_id = snap.id
 
-            # Use v2 API for rename — handles version correctly
             await svc.rename_page_v2(page_id, new_title)
 
         else:
@@ -256,13 +287,13 @@ async def apply_proposal(
                     detail="This proposal has no generated content to apply. Use /api/edit/generate first.",
                 )
 
-            # Fetch current state for snapshot
             current = await svc.get_page(page_id)
             original_title = current.get("title", proposal["source_page_title"])
             original_body  = current.get("body", {}).get("storage", {}).get("value", "")
             original_ver   = current.get("version", {}).get("number", 1)
 
             snap = Snapshot(
+                workspace_id=workspace.id,
                 id=str(uuid.uuid4()),
                 proposal_id=proposal_id,
                 page_id=page_id,
@@ -287,15 +318,16 @@ async def apply_proposal(
     proposal["applied_at"] = datetime.now(timezone.utc).isoformat()
     proposal["applied_by"] = body.applied_by
 
-    # Stamp last_fixed_at on the page record
-    page_row = await db.execute(select(Page).where(Page.id == page_id))
+    page_row = await db.execute(
+        select(Page).where(Page.workspace_id == workspace.id, Page.id == page_id)
+    )
     page_record = page_row.scalar_one_or_none()
     if page_record is not None:
         page_record.last_fixed_at = datetime.now(timezone.utc)
 
-    # Upsert audit entry with snapshot link
     stmt = pg_insert(AuditEntry).values(
         id=proposal_id,
+        workspace_id=workspace.id,
         page_id=proposal.get("source_page_id", ""),
         page_title=proposal.get("source_page_title", "Unknown Page"),
         space_key=proposal.get("space_key"),
@@ -329,13 +361,18 @@ async def apply_proposal(
 async def get_proposal_snapshot(
     proposal_id: str,
     db: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
 ):
-    """Return the snapshot metadata for an applied proposal (for rollback display)."""
     if proposal_id not in _proposals:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    if _proposals[proposal_id].get("workspace_id") != workspace.id:
         raise HTTPException(status_code=404, detail="Proposal not found")
 
     result = await db.execute(
-        select(Snapshot).where(Snapshot.proposal_id == proposal_id)
+        select(Snapshot).where(
+            Snapshot.workspace_id == workspace.id,
+            Snapshot.proposal_id == proposal_id,
+        )
     )
     snap = result.scalar_one_or_none()
     if snap is None:
@@ -365,21 +402,22 @@ async def rollback_proposal(
     proposal_id: str,
     body: RollbackRequest,
     db: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
 ):
-    """
-    Roll back an applied duplication fix using its snapshot.
-    - remove-block: restores the original page body
-    - consolidate-pages: restores the archived page to current status
-    """
     if proposal_id not in _proposals:
         raise HTTPException(status_code=404, detail="Proposal not found")
 
     proposal = _proposals[proposal_id]
+    if proposal.get("workspace_id") != workspace.id:
+        raise HTTPException(status_code=404, detail="Proposal not found")
     if proposal["status"] != "applied":
         raise HTTPException(status_code=400, detail="Only applied proposals can be rolled back")
 
     result = await db.execute(
-        select(Snapshot).where(Snapshot.proposal_id == proposal_id)
+        select(Snapshot).where(
+            Snapshot.workspace_id == workspace.id,
+            Snapshot.proposal_id == proposal_id,
+        )
     )
     snap = result.scalar_one_or_none()
     if snap is None:
@@ -387,18 +425,7 @@ async def rollback_proposal(
     if snap.rolled_back:
         raise HTTPException(status_code=400, detail="This change has already been rolled back")
 
-    if not settings.atlassian_api_token or not settings.atlassian_mail:
-        raise HTTPException(
-            status_code=503,
-            detail="Atlassian credentials not configured",
-        )
-
-    svc = ConfluenceService(
-        base_url=settings.atlassian_base_url,
-        api_token=settings.atlassian_api_token,
-        email=settings.atlassian_mail,
-    )
-
+    svc = _build_confluence(workspace)
     action = snap.action
 
     try:
@@ -411,7 +438,6 @@ async def rollback_proposal(
                 raise HTTPException(status_code=502, detail=f"Confluence rename rollback failed: {exc}")
 
         elif action == "remove-block":
-            # Restore original body content
             if not snap.page_body_before:
                 raise HTTPException(status_code=400, detail="No body snapshot available to restore")
             current = await svc.get_page(snap.page_id)
@@ -422,7 +448,6 @@ async def rollback_proposal(
             )
 
         elif action == "consolidate-pages":
-            # Restore archived page to current status
             if not snap.page_body_before:
                 raise HTTPException(status_code=400, detail="No content snapshot available to restore")
             space_key = proposal.get("_archived_space_key", "")
@@ -467,40 +492,28 @@ async def apply_rename_item(
     proposal_id: str,
     body: ApplyRenameItemRequest,
     db: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
 ):
-    """
-    Apply a single rename from a grouped rename proposal using the Confluence v2 API.
-    """
     if proposal_id not in _proposals:
         raise HTTPException(status_code=404, detail="Proposal not found")
 
     proposal = _proposals[proposal_id]
+    if proposal.get("workspace_id") != workspace.id:
+        raise HTTPException(status_code=404, detail="Proposal not found")
     if proposal.get("action") != "rename":
         raise HTTPException(status_code=400, detail="Not a rename proposal")
 
-    if not settings.atlassian_api_token or not settings.atlassian_mail:
-        raise HTTPException(
-            status_code=503,
-            detail="Atlassian credentials not configured",
-        )
-
-    svc = ConfluenceService(
-        base_url=settings.atlassian_base_url,
-        api_token=settings.atlassian_api_token,
-        email=settings.atlassian_mail,
-    )
+    svc = _build_confluence(workspace)
 
     renames = proposal.get("renames", [])
     rename_item = next((r for r in renames if r.get("pageId") == body.page_id), None)
 
-    # Confluence does not expose a folder rename API — block at the backend
     if rename_item and rename_item.get("isFolder"):
         raise HTTPException(
             status_code=400,
             detail="Confluence folders cannot be renamed via the API. Rename this folder manually in Confluence.",
         )
 
-    # Fetch current title for snapshot (needed for rollback)
     try:
         current_page = await svc.get_page(body.page_id)
     except Exception as exc:
@@ -509,8 +522,8 @@ async def apply_rename_item(
     original_title = current_page.get("title", body.page_id)
     original_ver = current_page.get("version", {}).get("number", 1)
 
-    # Snapshot the current title so rollback can restore it
     snap = Snapshot(
+        workspace_id=workspace.id,
         id=str(uuid.uuid4()),
         proposal_id=proposal_id,
         page_id=body.page_id,
@@ -528,16 +541,15 @@ async def apply_rename_item(
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Confluence API error: {exc}")
 
-    # Mark this specific rename as applied in the proposal's renames list
     for r in renames:
         if r.get("pageId") == body.page_id:
             r["applied"] = True
             r["appliedTitle"] = body.suggested_title
             break
 
-    # Upsert audit entry with snapshot link so rollback works
     stmt = pg_insert(AuditEntry).values(
         id=str(uuid.uuid4()),
+        workspace_id=workspace.id,
         page_id=body.page_id,
         page_title=body.suggested_title,
         space_key=proposal.get("space_key"),

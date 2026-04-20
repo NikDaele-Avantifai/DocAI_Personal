@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.auth import get_current_user
 from app.core.config import settings
 from app.api.routes import health, confluence, proposals, audit, analyze, edit, stats, batch, rollback, duplicates
-from app.api.routes import sync, chat, analysis_settings, sweep, dismissed
+from app.api.routes import sync, chat, analysis_settings, sweep, dismissed, workspace
 from app.db.database import init_db
 
 
@@ -60,3 +60,4 @@ app.include_router(chat.router,             prefix="/api/chat",        tags=["ch
 app.include_router(analysis_settings.router,prefix="/api/settings",   tags=["settings"],    dependencies=_auth)
 app.include_router(sweep.router,            prefix="/api/sweep",       tags=["sweep"],       dependencies=_auth)
 app.include_router(dismissed.router,        prefix="/api/pages",       tags=["dismissed"],   dependencies=_auth)
+app.include_router(workspace.router,        prefix="/api/workspace",   tags=["workspace"],   dependencies=_auth)

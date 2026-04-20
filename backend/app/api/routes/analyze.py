@@ -10,6 +10,8 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.db.database import get_db
+from app.core.workspace import get_current_workspace
+from app.models.workspace import Workspace
 from app.models.page_analysis import PageAnalysis
 from app.models.page import Page
 from app.models.analysis_settings import AnalysisSettings, WorkspaceSettings
@@ -102,8 +104,6 @@ class IssueLocation(BaseModel):
 
 
 # Keywords that indicate a fix requires information DocAI cannot access.
-# If any of these appear in the combined issue text, the issue is flagged
-# as needing human input rather than an AI-generated proposal.
 _NEEDS_HUMAN_SIGNALS = [
     "email", "e-mail",
     "phone", "telephone",
@@ -122,11 +122,6 @@ _NEEDS_HUMAN_SIGNALS = [
 
 
 def _is_auto_fixable(title: str, description: str, suggestion: str) -> bool:
-    """
-    Return True if DocAI can produce a correct fix automatically.
-    Return False when the fix requires context that is not in the page
-    (e.g. the correct email address, who the owner is, internal links).
-    """
     combined = f"{title} {description} {suggestion}".lower()
     return not any(signal in combined for signal in _NEEDS_HUMAN_SIGNALS)
 
@@ -178,7 +173,6 @@ def _build_system_prompt(analysis_settings: AnalysisSettings) -> str:
     max_issues = analysis_settings.max_issues_per_page
     confidence_threshold = analysis_settings.confidence_threshold
 
-    # Build issue category descriptions from taxonomy (only enabled types)
     issue_lines = []
     for issue_type, meta in ISSUE_TAXONOMY.items():
         if issue_type not in enabled:
@@ -386,7 +380,6 @@ def _build_user_message(
 
     msg = f"Please analyze this Confluence page:\n\n{page_info}"
 
-    # Attach user-dismissed issues so Claude never re-raises them
     if dismissed:
         msg += "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         msg += "\nUSER-DISMISSED ISSUES — DO NOT REPORT THESE AGAIN:"
@@ -398,7 +391,6 @@ def _build_user_message(
                 msg += f"\n  Content: {d['exact_content']}"
         msg += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-    # Attach fix-awareness context if a previous analysis exists at an older version
     if previous_analysis and previous_analysis.issues:
         prev_issues: list[dict] = previous_analysis.issues
         msg += f"""
@@ -438,14 +430,6 @@ Instructions:
 # ── Validate and clean parsed Claude output ───────────────────────────────────
 
 def _validate_and_clean(raw: dict, analysis_settings: AnalysisSettings) -> dict:
-    """
-    Post-process the parsed JSON from Claude (v2 issue schema).
-    - Filter by enabled category, severity, and confidence
-    - Enrich with taxonomy metadata
-    - Set needs_human_intervention from taxonomy OR null suggestedFix on text-issue
-    - Populate v1 backward-compat fields (description, suggestion, location)
-    - Cap at max_issues_per_page
-    """
     severity_rank = {"low": 0, "medium": 1, "high": 2}
     min_rank = severity_rank.get(analysis_settings.min_severity, 0)
     enabled = set(analysis_settings.enabled_issue_types)
@@ -453,33 +437,24 @@ def _validate_and_clean(raw: dict, analysis_settings: AnalysisSettings) -> dict:
 
     cleaned_issues = []
     for issue in raw.get("issues", []):
-        # category = internal taxonomy label (stale, unowned, etc.)
         category = issue.get("category", "")
         severity = issue.get("severity", "low")
         confidence = float(issue.get("confidence", 1.0))
 
-        # Filter by enabled taxonomy categories (skip if not a known category)
         if category in _TAXONOMY_CATEGORIES and category not in enabled:
             continue
-
-        # Filter by severity
         if severity_rank.get(severity, 0) < min_rank:
             continue
-
-        # Filter by confidence threshold
         if confidence < analysis_settings.confidence_threshold:
             continue
 
-        # Ensure ID
         if not issue.get("id"):
             issue["id"] = str(_uuid.uuid4())[:8]
 
-        # Enrich from taxonomy
         taxonomy_entry = ISSUE_TAXONOMY.get(category, {})
         issue["fixable"] = taxonomy_entry.get("fixable", True)
         issue["requires_human"] = taxonomy_entry.get("requires_human", False)
 
-        # Human intervention: taxonomy flag OR text-issue with no suggestedFix
         is_text_issue = issue.get("type", "general-issue") == "text-issue"
         has_fix = issue.get("suggestedFix") is not None
         needs_human = taxonomy_entry.get("requires_human", False) or (is_text_issue and not has_fix)
@@ -488,16 +463,10 @@ def _validate_and_clean(raw: dict, analysis_settings: AnalysisSettings) -> dict:
             taxonomy_entry.get("human_reason") or "Manual review required"
         ) if needs_human else None
 
-        # ── Populate v1 backward-compat fields ──────────────────────────────
-        # description ← explanation
         if not issue.get("description"):
             issue["description"] = issue.get("explanation", issue.get("title", ""))
-
-        # suggestion ← suggestedFix
         if not issue.get("suggestion"):
             issue["suggestion"] = issue.get("suggestedFix")
-
-        # location ← exactContent (so the frontend arrow/highlight logic still works)
         if not issue.get("location") and issue.get("exactContent"):
             issue["location"] = {
                 "section": "document",
@@ -519,21 +488,16 @@ async def analyze_page(
     body: AnalyzeRequest,
     force_refresh: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
 ):
-    """
-    Analyze a Confluence page using Claude AI and return detected issues.
-
-    Fix-aware: if the page has been analyzed before at an older version, Claude
-    receives that prior analysis as context and can mark issues as resolved.
-
-    Results are cached by (page_id, page_version). Pass force_refresh=true to
-    bypass the cache but still use the fix-awareness context.
-    """
+    wid = workspace.id
 
     # ── Load analysis settings from DB ────────────────────────────────────────
     analysis_settings: AnalysisSettings
     try:
-        settings_result = await db.execute(select(WorkspaceSettings).limit(1))
+        settings_result = await db.execute(
+            select(WorkspaceSettings).where(WorkspaceSettings.workspace_id == wid).limit(1)
+        )
         settings_row = settings_result.scalar_one_or_none()
         if settings_row and settings_row.settings:
             defaults = AnalysisSettings()
@@ -548,6 +512,7 @@ async def analyze_page(
         result = await db.execute(
             select(PageAnalysis)
             .where(
+                PageAnalysis.workspace_id == wid,
                 PageAnalysis.page_id == body.page_id,
                 PageAnalysis.page_version == body.page_version,
             )
@@ -574,6 +539,7 @@ async def analyze_page(
         prev_result = await db.execute(
             select(PageAnalysis)
             .where(
+                PageAnalysis.workspace_id == wid,
                 PageAnalysis.page_id == body.page_id,
                 PageAnalysis.page_version < body.page_version,
             )
@@ -586,7 +552,10 @@ async def analyze_page(
     dismissed_list: list[dict] = []
     if body.page_id:
         dismissed_result = await db.execute(
-            select(DismissedIssue).where(DismissedIssue.page_id == body.page_id)
+            select(DismissedIssue).where(
+                DismissedIssue.workspace_id == wid,
+                DismissedIssue.page_id == body.page_id,
+            )
         )
         dismissed_list = [
             {"issue_title": r.issue_title, "exact_content": r.exact_content}
@@ -613,21 +582,19 @@ async def analyze_page(
     raw = raw.strip()
 
     parsed = json.loads(raw)
-
-    # ── Validate and clean using settings ─────────────────────────────────────
     parsed = _validate_and_clean(parsed, analysis_settings)
 
     issues = [Issue(**raw_issue) for raw_issue in parsed.get("issues", [])]
     resolved = [ResolvedIssue(**r) for r in parsed.get("resolved_issues", [])]
     summary = parsed.get("summary", f"Analysis complete. Found {len(issues)} issue(s).")
 
-    # is_healthy: only true when Claude says so AND there are genuinely no issues
     high_or_medium = [i for i in issues if i.severity in ('high', 'medium')]
     is_healthy = bool(parsed.get("is_healthy", False)) and len(high_or_medium) == 0
 
     # ── Store in cache ────────────────────────────────────────────────────────
     if body.page_id and body.page_version is not None:
         record = PageAnalysis(
+            workspace_id=wid,
             page_id=body.page_id,
             page_version=body.page_version,
             issues=[issue.model_dump() for issue in issues],
@@ -639,8 +606,9 @@ async def analyze_page(
         )
         db.add(record)
 
-        # Update Page.is_healthy so the tree can reflect the current state
-        page_row = await db.execute(select(Page).where(Page.id == body.page_id))
+        page_row = await db.execute(
+            select(Page).where(Page.workspace_id == wid, Page.id == body.page_id)
+        )
         page = page_row.scalar_one_or_none()
         if page is not None:
             page.is_healthy = is_healthy
@@ -664,13 +632,12 @@ async def analyze_page(
 async def mark_page_reviewed(
     page_id: str,
     db: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
 ):
-    """
-    Manually mark a page as reviewed and healthy.
-    Useful for pages that are healthy but haven't been re-analyzed yet,
-    or to clear stale-content flags after a manual review.
-    """
-    page_row = await db.execute(select(Page).where(Page.id == page_id))
+    wid = workspace.id
+    page_row = await db.execute(
+        select(Page).where(Page.workspace_id == wid, Page.id == page_id)
+    )
     page = page_row.scalar_one_or_none()
 
     if page is None:
@@ -679,8 +646,8 @@ async def mark_page_reviewed(
 
     page.is_healthy = True
 
-    # Also store a "reviewed" analysis record so the UI can show it
     record = PageAnalysis(
+        workspace_id=wid,
         page_id=page_id,
         page_version=page.version,
         issues=[],

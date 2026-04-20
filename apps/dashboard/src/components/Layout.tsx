@@ -170,6 +170,14 @@ export default function Layout() {
             <span className="nav-label">Batch Rename</span>
           </NavLink>
 
+          {/* Settings — pinned at bottom of nav */}
+          <NavLink
+            to="/settings"
+            className={({ isActive }) => `nav-item nav-zone-break${isActive ? " active" : ""}`}>
+            <span className="nav-icon">⚙</span>
+            <span className="nav-label">Settings</span>
+          </NavLink>
+
           {/* Restructure — removed from render, routing preserved in TOOLS_NAV */}
           {/* <div className="nav-item-disabled">
             <span className="nav-icon">⊞</span>

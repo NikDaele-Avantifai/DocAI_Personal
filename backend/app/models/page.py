@@ -11,9 +11,10 @@ EMBEDDING_DIM = 1024  # Voyage-3 native dimension
 
 class Space(Base):
     __tablename__ = "spaces"
-    __table_args__ = (UniqueConstraint("key", name="uq_spaces_key"),)
+    __table_args__ = (UniqueConstraint("workspace_id", "key", name="uq_spaces_workspace_key"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     key: Mapped[str] = mapped_column(String, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     url: Mapped[str] = mapped_column(String, nullable=False, default="")
@@ -27,6 +28,7 @@ class Page(Base):
     __tablename__ = "pages"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     title: Mapped[str] = mapped_column(String, nullable=False)
     space_key: Mapped[str] = mapped_column(String, nullable=False, index=True)
     parent_id: Mapped[str | None] = mapped_column(String, nullable=True)

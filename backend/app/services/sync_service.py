@@ -83,9 +83,10 @@ def _build_tree(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 class SyncService:
-    def __init__(self, session: AsyncSession, confluence: ConfluenceService):
+    def __init__(self, session: AsyncSession, confluence: ConfluenceService, workspace_id: str = ""):
         self.session = session
         self.confluence = confluence
+        self.workspace_id = workspace_id
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -123,13 +124,13 @@ class SyncService:
         # ── 2. Fetch all pages + folders ──────────────────────────────────
         raw_pages = await self.confluence.get_all_pages_in_space(space_key)
 
-        # ── 2b. Back-fill any missing parents (e.g. Confluence Cloud folders
-        #         that the v1 content API doesn't return by type) ───────────
+        # ── 2b. Back-fill any missing parents ─────────────────────────────
         raw_pages = await self._fill_missing_parents(raw_pages)
 
         # ── 3. Upsert space ────────────────────────────────────────────────
         now = datetime.now(timezone.utc)
         stmt = pg_insert(Space).values(
+            workspace_id=self.workspace_id,
             key=space_key,
             name=space_name,
             url=space_url,
@@ -137,7 +138,7 @@ class SyncService:
             last_synced=now,
         )
         stmt = stmt.on_conflict_do_update(
-            constraint="uq_spaces_key",
+            constraint="uq_spaces_workspace_key",
             set_={
                 "name": space_name,
                 "url": space_url,
@@ -154,12 +155,10 @@ class SyncService:
             webui_page = links.get("webui", "")
             page_url = f"{self.confluence.base_url}/wiki{webui_page}" if webui_page else None
 
-            # Detect folders from both sources:
-            # - _is_folder=True: set by _fetch_folders_v2 (v2 API)
-            # - type="folder": returned by v1 API when fetching a folder by ID
             is_folder = bool(rp.get("_is_folder", False)) or rp.get("type") == "folder"
             stmt = pg_insert(Page).values(
                 id=page_id,
+                workspace_id=self.workspace_id,
                 title=rp.get("title", "Untitled"),
                 space_key=space_key,
                 parent_id=_extract_parent_id(rp),
@@ -191,6 +190,7 @@ class SyncService:
         confluence_ids = {str(rp["id"]) for rp in raw_pages}
         del_result = await self.session.execute(
             delete(Page).where(
+                Page.workspace_id == self.workspace_id,
                 Page.space_key == space_key,
                 Page.id.not_in(confluence_ids),
             )
@@ -233,7 +233,6 @@ class SyncService:
                 if item:
                     pages.append(item)
                     known_ids.add(missing_id)
-                    # Check if this newly fetched item also has a missing parent
                     grandparent = _extract_parent_id(item)
                     if grandparent and grandparent not in known_ids:
                         next_round.add(grandparent)
@@ -247,8 +246,11 @@ class SyncService:
         return pages
 
     async def get_all_synced_spaces(self) -> list[dict[str, Any]]:
-        """Return all spaces that have been synced, with metadata."""
-        result = await self.session.execute(select(Space).order_by(Space.name))
+        """Return all spaces that have been synced for this workspace, with metadata."""
+        q = select(Space).order_by(Space.name)
+        if self.workspace_id:
+            q = q.where(Space.workspace_id == self.workspace_id)
+        result = await self.session.execute(q)
         spaces = result.scalars().all()
         return [
             {
@@ -265,12 +267,12 @@ class SyncService:
         """Return pages for a space as a nested tree."""
         from app.models.page_analysis import PageAnalysis
 
-        result = await self.session.execute(
-            select(Page).where(Page.space_key == space_key).order_by(Page.title)
-        )
+        q = select(Page).where(Page.space_key == space_key).order_by(Page.title)
+        if self.workspace_id:
+            q = q.where(Page.workspace_id == self.workspace_id)
+        result = await self.session.execute(q)
         pages = result.scalars().all()
 
-        # Fetch the set of page IDs that have at least one analysis record
         analyzed_result = await self.session.execute(
             select(PageAnalysis.page_id).distinct()
             .where(PageAnalysis.page_id.in_([p.id for p in pages]))
@@ -305,8 +307,7 @@ class SyncService:
     ) -> dict[str, Any]:
         """
         Fetch a page from Confluence (with full body content) and cache it locally.
-        If embedding_svc is provided, immediately generates and stores the embedding
-        so callers don't need a separate embed pass.
+        If embedding_svc is provided, immediately generates and stores the embedding.
         Falls back to DB metadata if Confluence is unreachable.
         """
         try:
@@ -320,9 +321,9 @@ class SyncService:
             )).scalar_one_or_none()
             current_is_folder = existing_is_folder if existing_is_folder is not None else False
 
-            # Update DB with content
             stmt = pg_insert(Page).values(
                 id=page_id,
+                workspace_id=self.workspace_id,
                 title=raw.get("title", "Untitled"),
                 space_key=raw.get("space", {}).get("key", ""),
                 parent_id=_extract_parent_id(raw),
@@ -360,7 +361,6 @@ class SyncService:
             await self.session.execute(stmt)
             await self.session.commit()
 
-            # Auto-embed immediately after storing content
             if embedding_svc and content.strip():
                 try:
                     await embedding_svc.embed_page(page_id, self.session)

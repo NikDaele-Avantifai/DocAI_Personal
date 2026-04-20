@@ -35,11 +35,11 @@ class DuplicateService:
         page_id: str,
         db: AsyncSession,
         threshold: float = DEFAULT_THRESHOLD,
+        workspace_id: str = "",
     ) -> list[dict[str, Any]]:
         """
-        Returns all pages (across ALL spaces) whose embedding is cosine-similar
-        to the given page above the threshold.
-        similarity = 1 − cosine_distance  (pgvector <=> operator returns distance).
+        Returns all pages (across all spaces in the same workspace) whose embedding
+        is cosine-similar to the given page above the threshold.
         """
         result = await db.execute(select(Page).where(Page.id == page_id))
         page = result.scalar_one_or_none()
@@ -50,8 +50,11 @@ class DuplicateService:
                 f"Page {page_id} ({page.title}) has no embedding — run /embed-all first"
             )
 
-        # Cross-space: no space_key filter — duplicates can live in any space
-        query = text("""
+        workspace_clause = ""
+        if workspace_id:
+            workspace_clause = "AND workspace_id = :workspace_id"
+
+        query = text(f"""
             SELECT
                 id,
                 title,
@@ -63,19 +66,22 @@ class DuplicateService:
             WHERE id        != :page_id
               AND embedding IS NOT NULL
               AND 1 - (embedding <=> CAST(:query_vec AS vector)) > :threshold
+              {workspace_clause}
             ORDER BY similarity DESC
             LIMIT 20
         """)
 
-        # numpy arrays stringify with spaces; pgvector needs "[1.0,2.0,...]"
         query_vec = "[" + ",".join(str(float(v)) for v in page.embedding) + "]"
 
-        rows = (
-            await db.execute(
-                query,
-                {"query_vec": query_vec, "page_id": page_id, "threshold": threshold},
-            )
-        ).all()
+        params: dict[str, Any] = {
+            "query_vec": query_vec,
+            "page_id": page_id,
+            "threshold": threshold,
+        }
+        if workspace_id:
+            params["workspace_id"] = workspace_id
+
+        rows = (await db.execute(query, params)).all()
 
         return [
             {
@@ -96,15 +102,14 @@ class DuplicateService:
         db: AsyncSession,
         threshold: float = DEFAULT_THRESHOLD,
         space_key: str | None = None,
+        workspace_id: str = "",
     ) -> list[dict[str, Any]]:
         """
-        Scans every embedded page and returns deduplicated duplicate pairs.
-
-        space_key filters which pages are SCANNED (the "page A" side), but
-        comparisons are always cross-space so duplicates in other spaces surface too.
-        Pairs ordered by similarity descending; exact matches listed first.
+        Scans every embedded page in the workspace and returns deduplicated duplicate pairs.
         """
         q = select(Page).where(Page.embedding.is_not(None))  # type: ignore[attr-defined]
+        if workspace_id:
+            q = q.where(Page.workspace_id == workspace_id)
         if space_key:
             q = q.where(Page.space_key == space_key)
         q = q.order_by(Page.id)
@@ -115,7 +120,6 @@ class DuplicateService:
         seen: set[frozenset[str]] = set()
         pairs: list[dict[str, Any]] = []
 
-        # Build hash → [page, ...] index for O(1) exact-match lookup
         hash_index: dict[str, list[Page]] = {}
         for page in pages:
             if page.content_hash:
@@ -140,7 +144,9 @@ class DuplicateService:
         # ── Layer 2: semantic duplicates via vector similarity ─────────────
         for page in pages:
             try:
-                matches = await self.find_duplicates_for_page(page.id, db, threshold)
+                matches = await self.find_duplicates_for_page(
+                    page.id, db, threshold, workspace_id=workspace_id
+                )
             except ValueError:
                 continue
 
@@ -158,7 +164,6 @@ class DuplicateService:
                     "severity": "high" if similarity >= HIGH_THRESHOLD else "medium",
                 })
 
-        # Exact matches first, then by similarity descending
         pairs.sort(key=lambda x: (x["severity"] == "exact", x["similarity"]), reverse=True)
         return pairs
 

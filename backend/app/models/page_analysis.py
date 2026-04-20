@@ -9,6 +9,7 @@ class PageAnalysis(Base):
     __tablename__ = "page_analyses"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    workspace_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     page_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     page_version: Mapped[int] = mapped_column(Integer, nullable=False)
 

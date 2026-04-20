@@ -5,6 +5,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
+from app.core.workspace import get_current_workspace
+from app.models.workspace import Workspace
 from app.models.page import Page
 from app.models.page_analysis import PageAnalysis
 from app.models.sweep import WorkspaceSweep
@@ -70,16 +72,23 @@ def _classify_page(page: Page, has_open_issues: bool, ai_healthy: bool = False) 
 
 
 @router.post("/run")
-async def run_sweep(db: AsyncSession = Depends(get_db)):
+async def run_sweep(
+    db: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+):
     """
     Quick heuristic sweep across all pages — no AI calls, results in seconds.
     Persists results so the overview can track health over time.
     """
-    pages = (await db.execute(select(Page))).scalars().all()
+    wid = workspace.id
+    pages = (await db.execute(
+        select(Page).where(Page.workspace_id == wid)
+    )).scalars().all()
 
-    # Subquery: latest analysis timestamp per page
+    # Subquery: latest analysis timestamp per page (scoped to workspace)
     latest_subq = (
         select(PageAnalysis.page_id, func.max(PageAnalysis.analyzed_at).label("max_at"))
+        .where(PageAnalysis.workspace_id == wid)
         .group_by(PageAnalysis.page_id)
         .subquery()
     )
@@ -87,6 +96,7 @@ async def run_sweep(db: AsyncSession = Depends(get_db)):
     # Join to get only the latest analysis row per page
     latest_analyses = (await db.execute(
         select(PageAnalysis)
+        .where(PageAnalysis.workspace_id == wid)
         .join(
             latest_subq,
             (PageAnalysis.page_id == latest_subq.c.page_id) &
@@ -146,6 +156,7 @@ async def run_sweep(db: AsyncSession = Depends(get_db)):
 
     now = datetime.now(tz=timezone.utc)
     sweep = WorkspaceSweep(
+        workspace_id=wid,
         started_at=now,
         completed_at=now,
         status="completed",
@@ -171,11 +182,17 @@ async def run_sweep(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/latest")
-async def get_latest_sweep(db: AsyncSession = Depends(get_db)):
+async def get_latest_sweep(
+    db: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+):
     """Return the most recent completed sweep, or null if none exists."""
     row = (await db.execute(
         select(WorkspaceSweep)
-        .where(WorkspaceSweep.status == "completed")
+        .where(
+            WorkspaceSweep.workspace_id == workspace.id,
+            WorkspaceSweep.status == "completed",
+        )
         .order_by(WorkspaceSweep.completed_at.desc())
         .limit(1)
     )).scalar_one_or_none()

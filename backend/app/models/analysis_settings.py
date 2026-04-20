@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Literal
 from pydantic import BaseModel, Field
-from sqlalchemy import Integer, JSON, DateTime
+from sqlalchemy import Integer, String, JSON, DateTime, func
 from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime
 from app.db.database import Base
@@ -11,8 +11,11 @@ class WorkspaceSettings(Base):
     __tablename__ = "workspace_settings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
     settings: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
 
 
 ALL_ISSUE_TYPES = [

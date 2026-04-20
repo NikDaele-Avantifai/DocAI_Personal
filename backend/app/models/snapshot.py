@@ -13,6 +13,7 @@ class Snapshot(Base):
     __tablename__ = "snapshots"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)          # UUID
+    workspace_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     proposal_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     page_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     action: Mapped[str] = mapped_column(String, nullable=False)

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Literal
 import anthropic
@@ -10,6 +10,8 @@ import html as html_module
 from datetime import datetime
 
 from app.core.config import settings
+from app.core.workspace import get_current_workspace
+from app.models.workspace import Workspace
 from app.api.routes.proposals import _proposals
 
 router = APIRouter()
@@ -113,8 +115,6 @@ Respond with ONLY a valid JSON object:
 }"""
 
 # Used when exactContent is known — Claude returns ONLY the replacement for the snippet.
-# Python does the substitution server-side. This is the safest mode because Claude
-# never sees or can touch the rest of the page.
 SNIPPET_FIX_SYSTEM_PROMPT = """You are DocAI. You will be shown a short text snippet that has an issue. Return ONLY the corrected replacement for that snippet.
 
 CRITICAL RULES:
@@ -142,10 +142,6 @@ def _build_user_message(request: GenerateEditRequest) -> str:
     today = datetime.utcnow().strftime("%Y-%m-%d")
 
     if request.edit_type == "targeted_fix" and request.issue_title:
-        # ── Snippet mode: exactContent is known ──────────────────────────────
-        # We send ONLY the broken snippet to Claude and get back just its replacement.
-        # Python does the substitution. Claude never sees the rest of the page,
-        # so it cannot accidentally modify code blocks, headings, or other content.
         if request.issue_exact_content:
             msg = f"Issue: {request.issue_title}\n"
             if request.issue_description:
@@ -157,7 +153,6 @@ def _build_user_message(request: GenerateEditRequest) -> str:
             msg += f"\nSnippet to fix:\n{request.issue_exact_content}"
             return msg
 
-        # ── Full-page mode: no exactContent, Claude must locate the issue ────
         msg = f"Today's date: {today}\n"
         msg += f"Page title: {request.page_title}\n"
         if request.space:
@@ -178,7 +173,6 @@ def _build_user_message(request: GenerateEditRequest) -> str:
         msg += f"Space: {request.space}\n"
     if request.remove_section_hint:
         msg += f"Section to remove: {request.remove_section_hint}\n"
-    # Combined mode: apply the improvement AND fix detected issues in one pass
     if request.issue_title and request.issue_description:
         msg += "\n=== ALSO FIX THESE DETECTED ISSUES (apply alongside the edit type above) ===\n"
         msg += f"Issues: {request.issue_title}\n"
@@ -194,10 +188,9 @@ def _html_to_wiki(text: str) -> str:
     Convert Confluence storage-format HTML to wiki-markup-like plain text so that
     diffs between the old HTML page and the new wiki-markup content are readable.
     """
-    # Strip Confluence CDATA markers before any other processing
     text = text.replace('<![CDATA[', '')
     text = text.replace(']]>', '')
-    # Preserve Confluence code blocks as wiki {code} macros
+
     def _replace_code_block(m):
         inner = m.group(1).strip()
         return f'\n{{code}}\n{inner}\n{{code}}\n'
@@ -208,21 +201,18 @@ def _html_to_wiki(text: str) -> str:
         text,
         flags=re.IGNORECASE | re.DOTALL,
     )
-    # Handle plain-text-body elements outside of code macros
     text = re.sub(
         r'<ac:plain-text-body>(.*?)</ac:plain-text-body>',
         lambda m: f'\n{m.group(1).strip()}\n',
         text,
         flags=re.IGNORECASE | re.DOTALL,
     )
-    # Remove Confluence line-number spans before generic tag stripping
     text = re.sub(
         r'<span[^>]*(?:class="[^"]*(?:linenumber|ds-line-number)[^"]*"|data-ds--line-number)[^>]*>.*?</span>',
         '',
         text,
         flags=re.IGNORECASE | re.DOTALL,
     )
-    # Block-level elements → newlines with heading markers
     text = re.sub(r'<h([1-6])[^>]*>', lambda m: f'\nh{m.group(1)}. ', text, flags=re.IGNORECASE)
     text = re.sub(r'</h[1-6]>', '\n', text, flags=re.IGNORECASE)
     text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
@@ -230,24 +220,18 @@ def _html_to_wiki(text: str) -> str:
     text = re.sub(r'<li[^>]*>', '\n* ', text, flags=re.IGNORECASE)
     text = re.sub(r'</li>', '', text, flags=re.IGNORECASE)
     text = re.sub(r'</?[ou]l[^>]*>', '\n', text, flags=re.IGNORECASE)
-    # Inline formatting → wiki markup equivalents
     text = re.sub(r'<strong[^>]*>(.*?)</strong>', r'*\1*', text, flags=re.IGNORECASE | re.DOTALL)
     text = re.sub(r'<b[^>]*>(.*?)</b>', r'*\1*', text, flags=re.IGNORECASE | re.DOTALL)
     text = re.sub(r'<em[^>]*>(.*?)</em>', r'_\1_', text, flags=re.IGNORECASE | re.DOTALL)
     text = re.sub(r'<i[^>]*>(.*?)</i>', r'_\1_', text, flags=re.IGNORECASE | re.DOTALL)
-    # Strip any remaining tags
     text = re.sub(r'<[^>]+>', '', text)
-    # Decode HTML entities (&amp; &lt; &nbsp; etc.)
     text = html_module.unescape(text)
-    # Normalise whitespace
     text = re.sub(r'[ \t]+', ' ', text)
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
 
 def _generate_diff_lines(old_content: str, new_content: str) -> list[dict]:
-    # Normalise the old HTML content to wiki-markup-like text so the diff
-    # compares semantically equivalent representations, not raw HTML vs markup.
     old_lines = _html_to_wiki(old_content).splitlines()
     new_lines = new_content.splitlines()
 
@@ -264,7 +248,6 @@ def _generate_diff_lines(old_content: str, new_content: str) -> list[dict]:
         elif line.startswith(" "):
             result.append({"type": "context", "content": line[1:]})
 
-    # If no diff lines were produced (identical content), signal that
     if not result:
         result.append({"type": "context", "content": "(No changes detected)"})
 
@@ -272,7 +255,10 @@ def _generate_diff_lines(old_content: str, new_content: str) -> list[dict]:
 
 
 @router.post("/generate")
-async def generate_edit(body: GenerateEditRequest):
+async def generate_edit(
+    body: GenerateEditRequest,
+    workspace: Workspace = Depends(get_current_workspace),
+):
     """
     Use Claude to generate an improved version of a page, then store it as a proposal.
     Returns the created proposal including the diff for the dashboard to display.
@@ -320,30 +306,23 @@ async def generate_edit(body: GenerateEditRequest):
 
     is_deletion = False
     if use_snippet_mode:
-        # Snippet mode: Claude returns only the replacement text for the snippet.
-        # We do the substitution server-side so nothing else in the page changes.
         replacement: str = parsed.get("replacement", "")
-        # Empty replacement = deletion
         is_deletion = replacement.strip() == ""
         wiki_content = _html_to_wiki(body.content)
         exact = body.issue_exact_content or ""
         if exact and exact in wiki_content:
             new_content = wiki_content.replace(exact, replacement, 1)
         else:
-            # Fallback: exact string not found verbatim — try a stripped comparison
             stripped_exact = exact.strip()
             stripped_wiki = wiki_content
             if stripped_exact and stripped_exact in stripped_wiki:
                 new_content = stripped_wiki.replace(stripped_exact, replacement, 1)
             else:
-                # Cannot locate the exact content — return the page unchanged so
-                # the diff shows nothing rather than garbling the document.
                 new_content = wiki_content
                 is_deletion = False
                 rationale = f"[Snippet not found in page — no change applied] {rationale}"
     else:
         raw_new_content: str = parsed.get("new_content", "")
-        # Claude signals "delete this section" by returning the literal string "delete"
         is_deletion = raw_new_content.strip().lower() == "delete"
         new_content = "" if is_deletion else raw_new_content
 
@@ -357,6 +336,7 @@ async def generate_edit(body: GenerateEditRequest):
 
     proposal = {
         "id": proposal_id,
+        "workspace_id": workspace.id,
         "category": "analysis",
         "action": action,
         "action_label": EDIT_TYPE_LABELS[body.edit_type],
@@ -380,5 +360,4 @@ async def generate_edit(body: GenerateEditRequest):
 
     _proposals[proposal_id] = proposal
 
-    # Return with diff already parsed so the dashboard can render it immediately
     return {**proposal, "diff": diff_lines}

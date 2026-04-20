@@ -4,6 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 
 from app.db.database import get_db
+from app.core.workspace import get_current_workspace
+from app.models.workspace import Workspace
 from app.models.dismissed_issue import DismissedIssue
 
 router = APIRouter()
@@ -20,16 +22,19 @@ async def dismiss_issue(
     page_id: str,
     body: DismissRequest,
     db: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
 ):
     """Mark a human-review issue as valid/resolved so Claude won't re-raise it."""
-    # Upsert: delete any existing record for this page+issue then insert fresh
+    # Upsert: delete any existing record for this workspace+page+issue then insert fresh
     await db.execute(
         delete(DismissedIssue).where(
+            DismissedIssue.workspace_id == workspace.id,
             DismissedIssue.page_id == page_id,
             DismissedIssue.issue_id == body.issue_id,
         )
     )
     record = DismissedIssue(
+        workspace_id=workspace.id,
         page_id=page_id,
         issue_id=body.issue_id,
         issue_title=body.issue_title,
@@ -44,10 +49,14 @@ async def dismiss_issue(
 async def list_dismissed(
     page_id: str,
     db: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
 ):
     """Return all dismissed issues for a page."""
     result = await db.execute(
-        select(DismissedIssue).where(DismissedIssue.page_id == page_id)
+        select(DismissedIssue).where(
+            DismissedIssue.workspace_id == workspace.id,
+            DismissedIssue.page_id == page_id,
+        )
     )
     rows = result.scalars().all()
     return {

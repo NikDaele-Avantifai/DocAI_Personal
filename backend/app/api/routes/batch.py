@@ -15,7 +15,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.workspace import get_current_workspace
 from app.db.database import get_db
+from app.models.workspace import Workspace
 from app.models.page import Page
 
 router = APIRouter()
@@ -48,7 +50,6 @@ _DATE_RE = re.compile(
 
 
 def _is_deterministic_poor(title: str) -> str | None:
-    """Return reason string if title is deterministically poor, else None."""
     stripped = title.strip()
     if not stripped:
         return "Empty or whitespace-only title"
@@ -114,10 +115,11 @@ Format:
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def _build_grouped_proposal(renames: list[dict[str, Any]]) -> dict[str, Any]:
+def _build_grouped_proposal(renames: list[dict[str, Any]], workspace_id: str) -> dict[str, Any]:
     pid = str(uuid.uuid4())
     return {
         "id": pid,
+        "workspace_id": workspace_id,
         "action": "rename",
         "category": "rename",
         "source_page_id": renames[0]["pageId"] if renames else "",
@@ -134,7 +136,6 @@ def _build_grouped_proposal(renames: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _call_claude(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Send page metadata + content snippets to Claude and return rename suggestions."""
     payload = json.dumps([
         {
             "pageId": p["id"],
@@ -178,13 +179,10 @@ class BatchRenameRequest(BaseModel):
 async def batch_rename(
     body: BatchRenameRequest,
     db: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
 ):
-    """
-    Scan all synced pages for poorly-named pages.
-    Pre-filters deterministically, then uses Claude for content-relevance scoring.
-    Creates a single grouped rename proposal.
-    """
-    q = select(Page)
+    wid = workspace.id
+    q = select(Page).where(Page.workspace_id == wid)
     if body.space_key:
         q = q.where(Page.space_key == body.space_key)
     rows = (await db.execute(q)).scalars().all()
@@ -209,41 +207,37 @@ async def batch_rename(
             "_det_reason": det_reason or "",
         })
 
-    # Build parent→children map for folder enrichment
-    all_pages = (await db.execute(select(Page))).scalars().all()
+    # Build parent→children map for folder enrichment (scoped to workspace)
+    all_pages = (await db.execute(
+        select(Page).where(Page.workspace_id == wid)
+    )).scalars().all()
     children_map: dict[str, list[str]] = {}
     for p in all_pages:
         if p.parent_id:
             children_map.setdefault(p.parent_id, []).append(p.title or "")
 
-    # Enrich folders with children; classify empty pages
     for p in pages:
         if p.get("is_folder"):
             child_titles = children_map.get(p["id"], [])
             p["childTitles"] = child_titles[:10]
             if child_titles:
                 p["contentSnippet"] = f"Folder containing: {', '.join(child_titles[:5])}"
-                # Re-evaluate deterministic flag with folder's current title
                 if not p.get("_deterministic"):
                     det = _is_deterministic_poor(p["title"])
                     if det:
                         p["_deterministic"] = True
                         p["_det_reason"] = det
             else:
-                # Empty folder — no children to derive a name from
                 p["_skip"] = True
 
         if not p.get("is_folder"):
             is_empty = (p.get("word_count") or 0) < 10 and not p.get("content", "").strip()
             if is_empty and not p.get("_deterministic"):
-                # Empty page with an acceptable title — nothing to rename
                 p["_skip"] = True
                 p["_skip_reason"] = "empty_content_acceptable_title"
             elif is_empty and p.get("_deterministic"):
-                # Empty page with a bad title — flag for human review, don't send to Claude
                 p["_is_empty_page"] = True
 
-    # Collect empty pages with bad titles — add directly as manual-review suggestions
     empty_bad_title_pages = [
         p for p in pages
         if not p.get("_skip") and not p.get("is_folder") and p.get("_is_empty_page")
@@ -253,7 +247,6 @@ async def batch_rename(
     skipped_empty_pages = sum(1 for p in pages if p.get("_skip") and not p.get("is_folder"))
     skipped_empty_folders = sum(1 for p in pages if p.get("_skip") and p.get("is_folder"))
 
-    # Call Claude in batches of 50 (content snippets make payloads larger)
     BATCH = 50
     suggestions: list[dict[str, Any]] = []
     for i in range(0, len(pages_to_scan), BATCH):
@@ -264,7 +257,6 @@ async def batch_rename(
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"AI analysis failed: {exc}")
 
-    # Filter out bad suggestions that Claude sometimes produces
     _bad_titles = {"untitled page", "untitled", "page", "document", "general information", "page content", "cannot determine from empty content"}
     suggestions = [
         s for s in suggestions
@@ -273,7 +265,6 @@ async def batch_rename(
         and s.get("suggestedTitle", "") != s.get("currentTitle", "")
     ]
 
-    # Append empty pages with bad titles as manual-review entries (no Claude suggestion possible)
     for p in empty_bad_title_pages:
         suggestions.append({
             "pageId": p["id"],
@@ -297,14 +288,12 @@ async def batch_rename(
             "skipped_low_confidence": 0,
         }
 
-    # Enrich suggestions with isFolder from the page map
     page_map = {p["id"]: p for p in pages}
     for s in suggestions:
         page = page_map.get(s.get("pageId", ""), {})
         s.setdefault("isFolder", page.get("is_folder", False))
 
-    # Build single grouped proposal
-    proposal = _build_grouped_proposal(suggestions)
+    proposal = _build_grouped_proposal(suggestions, wid)
     _proposals[proposal["id"]] = proposal
 
     return {
@@ -322,8 +311,11 @@ async def batch_rename(
 async def preview_rename_candidates(
     space_key: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
 ):
-    q = select(Page.id, Page.title, Page.space_key, Page.word_count)
+    q = select(Page.id, Page.title, Page.space_key, Page.word_count).where(
+        Page.workspace_id == workspace.id
+    )
     if space_key:
         q = q.where(Page.space_key == space_key)
     rows = (await db.execute(q)).all()

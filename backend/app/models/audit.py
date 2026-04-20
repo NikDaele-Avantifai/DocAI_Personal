@@ -9,6 +9,7 @@ class AuditEntry(Base):
     __tablename__ = "audit_log"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)          # UUID of proposal
+    workspace_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     page_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     page_title: Mapped[str] = mapped_column(String, nullable=False)
     space_key: Mapped[str | None] = mapped_column(String, nullable=True)
