@@ -10,7 +10,7 @@ from typing import Any
 
 import anthropic
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -171,8 +171,15 @@ def _call_claude(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
 # ── Routes ───────────────────────────────────────────────────────────────────
 
 class BatchRenameRequest(BaseModel):
-    space_key: str | None = None
-    min_confidence: int = 70
+    space_key: str | None = Field(None, max_length=500)
+    min_confidence: int = Field(70, ge=0, le=100)
+
+    @field_validator("space_key", mode="before")
+    @classmethod
+    def strip_whitespace(cls, v):
+        if isinstance(v, str):
+            return v.strip()
+        return v
 
 
 @router.post("/rename")

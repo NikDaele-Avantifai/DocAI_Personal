@@ -1,4 +1,5 @@
 import logging
+import sqlalchemy
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -46,6 +47,21 @@ async def init_db() -> None:
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+
+        # Verify critical migrations have run
+        async with engine.connect() as conn:
+            result = await conn.execute(sqlalchemy.text("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'spaces'
+                AND column_name = 'workspace_id'
+            """))
+            if not result.fetchone():
+                logger.critical(
+                    "MIGRATION NEEDED: spaces.workspace_id column missing. "
+                    "Run: alembic upgrade head"
+                )
+
         logger.info("Database tables initialised successfully.")
     except Exception as exc:
         logger.warning(

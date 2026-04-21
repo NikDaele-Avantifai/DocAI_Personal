@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 
@@ -12,9 +12,16 @@ router = APIRouter()
 
 
 class DismissRequest(BaseModel):
-    issue_id: str
-    issue_title: str
-    exact_content: str | None = None
+    issue_id: str = Field(..., max_length=500)
+    issue_title: str = Field(..., max_length=500)
+    exact_content: str | None = Field(None, max_length=50000)
+
+    @field_validator("issue_id", "issue_title", mode="before")
+    @classmethod
+    def strip_whitespace(cls, v):
+        if isinstance(v, str):
+            return v.strip()
+        return v
 
 
 @router.post("/{page_id}/dismiss")

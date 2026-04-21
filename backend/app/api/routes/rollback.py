@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,7 +40,7 @@ def _build_confluence(workspace: Workspace) -> ConfluenceService:
 
 
 class RollbackRequest(BaseModel):
-    rolled_back_by: str = "Dashboard User"
+    rolled_back_by: str = Field("Dashboard User", max_length=500)
 
 
 @router.post("/{snapshot_id}")

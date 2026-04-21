@@ -24,11 +24,6 @@ class Settings(BaseSettings):
             url = url.replace("postgres://", "postgresql+asyncpg://", 1)
         return url
 
-    # Azure Entra ID (legacy — replaced by Auth0)
-    azure_tenant_id: str = ""
-    azure_client_id: str = ""
-    azure_client_secret: str = ""
-
     # Auth0
     auth0_domain: str = ""        # e.g. yourorg.auth0.com
     auth0_audience: str = ""      # API identifier, e.g. https://api.docai.io
@@ -53,5 +48,28 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         return self.app_env == "production"
 
+    def validate_production_secrets(self) -> list[str]:
+        """Returns list of missing required secrets for production."""
+        issues = []
+        if self.is_production:
+            if not self.auth0_domain:
+                issues.append("AUTH0_DOMAIN not set")
+            if not self.auth0_audience:
+                issues.append("AUTH0_AUDIENCE not set")
+            if not self.anthropic_api_key:
+                issues.append("ANTHROPIC_API_KEY not set")
+            if self.app_secret_key == "dev-secret-change-in-production":
+                issues.append("APP_SECRET_KEY is still the default dev value")
+        return issues
+
 
 settings = Settings()
+
+# Warn loudly if production secrets are missing
+import logging as _logging
+_issues = settings.validate_production_secrets()
+if _issues:
+    for _issue in _issues:
+        _logging.getLogger(__name__).critical(
+            "SECURITY: %s — fix before handling real traffic", _issue
+        )

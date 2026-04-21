@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from typing import Literal
 import uuid
 from datetime import datetime, timezone
@@ -49,18 +49,32 @@ def _build_confluence(workspace: Workspace) -> ConfluenceService:
 
 class CreateProposalRequest(BaseModel):
     action: Literal["archive", "merge", "restructure", "update_owner", "add_summary", "retag"]
-    source_page_id: str
-    source_page_title: str
-    target_page_id: str | None = None
-    target_page_title: str | None = None
-    rationale: str
-    diff: str | None = None
+    source_page_id: str = Field(..., max_length=500)
+    source_page_title: str = Field(..., max_length=500)
+    target_page_id: str | None = Field(None, max_length=500)
+    target_page_title: str | None = Field(None, max_length=500)
+    rationale: str = Field(..., max_length=50000)
+    diff: str | None = Field(None, max_length=50000)
+
+    @field_validator("source_page_id", "source_page_title", "rationale", mode="before")
+    @classmethod
+    def strip_whitespace(cls, v):
+        if isinstance(v, str):
+            return v.strip()
+        return v
 
 
 class ReviewProposalRequest(BaseModel):
     status: Literal["approved", "rejected"]
-    reviewed_by: str
-    note: str | None = None
+    reviewed_by: str = Field(..., max_length=500)
+    note: str | None = Field(None, max_length=50000)
+
+    @field_validator("reviewed_by", mode="before")
+    @classmethod
+    def strip_whitespace(cls, v):
+        if isinstance(v, str):
+            return v.strip()
+        return v
 
 
 @router.get("/")
@@ -154,8 +168,8 @@ async def get_proposal(
 
 
 class ApplyProposalRequest(BaseModel):
-    applied_by: str = "Dashboard User"
-    content_override: str | None = None  # user-edited content takes precedence over AI-generated
+    applied_by: str = Field("Dashboard User", max_length=500)
+    content_override: str | None = Field(None, max_length=50000)  # user-edited content takes precedence over AI-generated
 
 
 @router.post("/{proposal_id}/apply")
@@ -394,7 +408,7 @@ async def get_proposal_snapshot(
 
 
 class RollbackRequest(BaseModel):
-    rolled_back_by: str = "Dashboard User"
+    rolled_back_by: str = Field("Dashboard User", max_length=500)
 
 
 @router.post("/{proposal_id}/rollback")
@@ -482,9 +496,16 @@ async def rollback_proposal(
 
 
 class ApplyRenameItemRequest(BaseModel):
-    page_id: str
-    suggested_title: str
-    applied_by: str = "Dashboard User"
+    page_id: str = Field(..., max_length=500)
+    suggested_title: str = Field(..., max_length=500)
+    applied_by: str = Field("Dashboard User", max_length=500)
+
+    @field_validator("page_id", "suggested_title", mode="before")
+    @classmethod
+    def strip_whitespace(cls, v):
+        if isinstance(v, str):
+            return v.strip()
+        return v
 
 
 @router.post("/{proposal_id}/apply-rename")

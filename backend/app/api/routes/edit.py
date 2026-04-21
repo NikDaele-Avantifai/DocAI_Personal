@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from typing import Literal
 import anthropic
 import json
@@ -19,19 +19,26 @@ client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
 
 class GenerateEditRequest(BaseModel):
-    page_id: str
-    page_title: str
-    content: str
-    page_version: int = 1
+    page_id: str = Field(..., max_length=500)
+    page_title: str = Field(..., max_length=500)
+    content: str = Field(..., max_length=50000)
+    page_version: int = Field(1, ge=1, le=100000)
     edit_type: Literal["restructure", "add_summary", "rewrite", "remove_section", "targeted_fix"]
-    remove_section_hint: str | None = None
-    space: str | None = None
+    remove_section_hint: str | None = Field(None, max_length=500)
+    space: str | None = Field(None, max_length=500)
     # Populated when fixing a specific detected issue (enables targeted-fix mode)
-    issue_title: str | None = None
-    issue_description: str | None = None
-    issue_suggestion: str | None = None
+    issue_title: str | None = Field(None, max_length=500)
+    issue_description: str | None = Field(None, max_length=50000)
+    issue_suggestion: str | None = Field(None, max_length=50000)
     # v2: exact verbatim text that has the issue (from exactContent field)
-    issue_exact_content: str | None = None
+    issue_exact_content: str | None = Field(None, max_length=50000)
+
+    @field_validator("page_id", "page_title", mode="before")
+    @classmethod
+    def strip_whitespace(cls, v):
+        if isinstance(v, str):
+            return v.strip()
+        return v
 
 
 EDIT_TYPE_LABELS = {

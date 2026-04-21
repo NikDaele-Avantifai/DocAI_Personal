@@ -5,7 +5,7 @@ from typing import AsyncGenerator
 import anthropic
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from app.core.config import settings
 
@@ -14,12 +14,19 @@ log = logging.getLogger(__name__)
 
 
 class ChatMessage(BaseModel):
-    role: str
-    content: str
+    role: str = Field(..., max_length=50)
+    content: str = Field(..., max_length=50000)
+
+    @field_validator("role", "content", mode="before")
+    @classmethod
+    def strip_whitespace(cls, v):
+        if isinstance(v, str):
+            return v.strip()
+        return v
 
 
 class ChatRequest(BaseModel):
-    messages: list[ChatMessage]
+    messages: list[ChatMessage] = Field(..., max_length=50)
     context: dict = {}
 
 

@@ -1,6 +1,6 @@
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from typing import Literal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -186,14 +186,28 @@ async def scan_single_page(
 # ── Merge proposal ────────────────────────────────────────────────────────────
 
 class ProposeMergeRequest(BaseModel):
-    page_a_id: str
-    page_b_id: str
+    page_a_id: str = Field(..., max_length=500)
+    page_b_id: str = Field(..., max_length=500)
+
+    @field_validator("page_a_id", "page_b_id", mode="before")
+    @classmethod
+    def strip_whitespace(cls, v):
+        if isinstance(v, str):
+            return v.strip()
+        return v
 
 
 class ProposeDuplicateRequest(BaseModel):
-    page_a_id: str
-    page_b_id: str
+    page_a_id: str = Field(..., max_length=500)
+    page_b_id: str = Field(..., max_length=500)
     action: Literal["remove-block", "consolidate-pages"]
+
+    @field_validator("page_a_id", "page_b_id", mode="before")
+    @classmethod
+    def strip_whitespace(cls, v):
+        if isinstance(v, str):
+            return v.strip()
+        return v
 
 
 @router.post("/propose-duplicate")

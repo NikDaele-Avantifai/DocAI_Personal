@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from app.services.confluence_service import ConfluenceService
 
@@ -7,9 +7,16 @@ router = APIRouter()
 
 
 class ConfluenceCredentials(BaseModel):
-    base_url: str
-    email: str
-    api_token: str
+    base_url: str = Field(..., max_length=2048)
+    email: str = Field(..., max_length=254)
+    api_token: str = Field(..., max_length=500)
+
+    @field_validator("base_url", "email", mode="before")
+    @classmethod
+    def strip_whitespace(cls, v):
+        if isinstance(v, str):
+            return v.strip()
+        return v
 
 
 @router.post("/spaces")

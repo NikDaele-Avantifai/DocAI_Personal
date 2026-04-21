@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from typing import Literal, Optional
 import anthropic
 import json
@@ -88,13 +88,20 @@ ISSUE_TAXONOMY: dict[str, dict] = {
 # ── Request / Response models ─────────────────────────────────────────────────
 
 class AnalyzeRequest(BaseModel):
-    url: str
-    title: str | None = None
-    content: str | None = None
-    last_modified: str | None = None
-    owner: str | None = None
-    page_id: str | None = None
-    page_version: int | None = None
+    url: str = Field(..., max_length=2048)
+    title: str | None = Field(None, max_length=500)
+    content: str | None = Field(None, max_length=50000)
+    last_modified: str | None = Field(None, max_length=500)
+    owner: str | None = Field(None, max_length=500)
+    page_id: str | None = Field(None, max_length=500)
+    page_version: int | None = Field(None, ge=1, le=100000)
+
+    @field_validator("url", "title", "owner", "page_id", mode="before")
+    @classmethod
+    def strip_whitespace(cls, v):
+        if isinstance(v, str):
+            return v.strip()
+        return v
 
 
 class IssueLocation(BaseModel):
