@@ -44,7 +44,11 @@ MIGRATIONS = [
             "UPDATE spaces SET workspace_id = '00000000-0000-0000-0000-000000000001' WHERE workspace_id IS NULL",
             'CREATE INDEX IF NOT EXISTS ix_spaces_workspace_id ON spaces(workspace_id)',
             'ALTER TABLE spaces DROP CONSTRAINT IF EXISTS uq_spaces_key',
-            'ALTER TABLE spaces ADD CONSTRAINT uq_spaces_workspace_key UNIQUE (workspace_id, key)',
+            """DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_spaces_workspace_key') THEN
+                    ALTER TABLE spaces ADD CONSTRAINT uq_spaces_workspace_key UNIQUE (workspace_id, key);
+                END IF;
+            END $$""",
             'ALTER TABLE pages ADD COLUMN IF NOT EXISTS workspace_id VARCHAR',
             "UPDATE pages SET workspace_id = '00000000-0000-0000-0000-000000000001' WHERE workspace_id IS NULL",
             'CREATE INDEX IF NOT EXISTS ix_pages_workspace_id ON pages(workspace_id)',
@@ -67,12 +71,45 @@ MIGRATIONS = [
             "UPDATE workspace_settings SET workspace_id = '00000000-0000-0000-0000-000000000001' WHERE workspace_id IS NULL",
         ]
     ),
-    # ── Add future migrations here ────────────────────────────────────────────
-    # (
-    #     '002_add_rate_limiting',
-    #     'Add rate limiting table',
-    #     ['CREATE TABLE IF NOT EXISTS ...']
-    # ),
+    (
+        '002_usage_tracking',
+        'Add usage tracking tables and plan field to workspaces',
+        [
+            # Plan field on workspaces
+            "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS plan VARCHAR NOT NULL DEFAULT 'trial'",
+            "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ",
+
+            # Set trial end date for existing workspaces (14 days from now)
+            "UPDATE workspaces SET trial_ends_at = NOW() + INTERVAL '14 days' WHERE plan = 'trial' AND trial_ends_at IS NULL",
+
+            # workspace_usage table
+            """CREATE TABLE IF NOT EXISTS workspace_usage (
+                id SERIAL PRIMARY KEY,
+                workspace_id VARCHAR NOT NULL,
+                period VARCHAR NOT NULL,
+                analyses_count INTEGER NOT NULL DEFAULT 0,
+                chat_count INTEGER NOT NULL DEFAULT 0,
+                rename_count INTEGER NOT NULL DEFAULT 0,
+                duplication_scans_count INTEGER NOT NULL DEFAULT 0,
+                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                CONSTRAINT uq_usage_workspace_period UNIQUE (workspace_id, period)
+            )""",
+            "CREATE INDEX IF NOT EXISTS ix_workspace_usage_workspace_id ON workspace_usage(workspace_id)",
+
+            # usage_events table
+            """CREATE TABLE IF NOT EXISTS usage_events (
+                id SERIAL PRIMARY KEY,
+                workspace_id VARCHAR NOT NULL,
+                user_sub VARCHAR NOT NULL,
+                user_email VARCHAR,
+                action VARCHAR NOT NULL,
+                meta VARCHAR,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )""",
+            "CREATE INDEX IF NOT EXISTS ix_usage_events_workspace_id ON usage_events(workspace_id)",
+            "CREATE INDEX IF NOT EXISTS ix_usage_events_user_sub ON usage_events(user_sub)",
+        ]
+    ),
 ]
 
 # ── Runner ────────────────────────────────────────────────────────────────────

@@ -3,11 +3,17 @@ import logging
 from typing import AsyncGenerator
 
 import anthropic
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.auth import get_current_user
+from app.core.usage import check_limit, track_usage
+from app.core.workspace import get_current_workspace
+from app.db.database import get_db
+from app.models.workspace import Workspace
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -112,13 +118,20 @@ async def stream_anthropic(messages: list[dict], context_block: str) -> AsyncGen
 
 
 @router.post("")
-async def chat(body: ChatRequest):
+async def chat(
+    body: ChatRequest,
+    db: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    user: dict = Depends(get_current_user),
+):
     """Stream a chat response using Claude via SSE."""
     if not settings.anthropic_api_key:
         raise HTTPException(
             status_code=503,
             detail="ANTHROPIC_API_KEY not configured. Add it to backend/.env",
         )
+
+    await check_limit(db, workspace, "chat")
 
     messages = [
         {"role": m.role, "content": m.content}
@@ -130,6 +143,10 @@ async def chat(body: ChatRequest):
         raise HTTPException(status_code=422, detail="No messages provided")
 
     context_block = build_context_block(body.context)
+
+    # Track usage before streaming — Claude call is considered made once we start
+    await track_usage(db, workspace, user, "chat")
+    await db.commit()
 
     return StreamingResponse(
         stream_anthropic(messages, context_block),

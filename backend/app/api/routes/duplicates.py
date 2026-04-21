@@ -6,6 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.auth import get_current_user
+from app.core.usage import check_limit, track_usage
 from app.core.workspace import get_current_workspace
 from app.core.encryption import decrypt_token
 from app.db.database import get_db
@@ -215,6 +217,7 @@ async def propose_duplicate(
     body: ProposeDuplicateRequest,
     db: AsyncSession = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
+    user: dict = Depends(get_current_user),
 ):
     """Creates a structured duplication proposal with Claude-identified duplicate content."""
     existing = next(
@@ -228,6 +231,8 @@ async def propose_duplicate(
     if existing:
         return {"proposal": existing, "already_exists": True}
 
+    await check_limit(db, workspace, "duplication_scan")
+
     try:
         proposal = await _duplicate_svc.generate_duplicate_proposal(
             body.page_a_id, body.page_b_id, body.action, db
@@ -237,6 +242,7 @@ async def propose_duplicate(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Proposal generation failed: {exc}")
 
+    await track_usage(db, workspace, user, "duplication_scan", meta=f"{body.page_a_id},{body.page_b_id}")
     proposal["workspace_id"] = workspace.id
     _proposals[proposal["id"]] = proposal
     return {"proposal": proposal, "already_exists": False}
@@ -247,6 +253,7 @@ async def propose_merge(
     body: ProposeMergeRequest,
     db: AsyncSession = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
+    user: dict = Depends(get_current_user),
 ):
     """Asks Claude to analyse two pages and creates a merge proposal in the Approvals queue."""
     existing = next(
@@ -259,6 +266,8 @@ async def propose_merge(
     if existing:
         return {"proposal": existing, "already_exists": True}
 
+    await check_limit(db, workspace, "duplication_scan")
+
     try:
         proposal = await _duplicate_svc.generate_merge_proposal(body.page_a_id, body.page_b_id, db)
     except ValueError as exc:
@@ -266,6 +275,7 @@ async def propose_merge(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Proposal generation failed: {exc}")
 
+    await track_usage(db, workspace, user, "duplication_scan", meta=f"{body.page_a_id},{body.page_b_id}")
     proposal["workspace_id"] = workspace.id
     _proposals[proposal["id"]] = proposal
     return {"proposal": proposal, "already_exists": False}

@@ -15,6 +15,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.auth import get_current_user
+from app.core.usage import check_limit, track_usage
 from app.core.workspace import get_current_workspace
 from app.db.database import get_db
 from app.models.workspace import Workspace
@@ -187,6 +189,7 @@ async def batch_rename(
     body: BatchRenameRequest,
     db: AsyncSession = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
+    user: dict = Depends(get_current_user),
 ):
     wid = workspace.id
     q = select(Page).where(Page.workspace_id == wid)
@@ -254,6 +257,8 @@ async def batch_rename(
     skipped_empty_pages = sum(1 for p in pages if p.get("_skip") and not p.get("is_folder"))
     skipped_empty_folders = sum(1 for p in pages if p.get("_skip") and p.get("is_folder"))
 
+    await check_limit(db, workspace, "rename")
+
     BATCH = 50
     suggestions: list[dict[str, Any]] = []
     for i in range(0, len(pages_to_scan), BATCH):
@@ -263,6 +268,8 @@ async def batch_rename(
             suggestions.extend(results)
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"AI analysis failed: {exc}")
+
+    await track_usage(db, workspace, user, "rename", meta=body.space_key)
 
     _bad_titles = {"untitled page", "untitled", "page", "document", "general information", "page content", "cannot determine from empty content"}
     suggestions = [

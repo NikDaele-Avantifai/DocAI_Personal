@@ -27,6 +27,15 @@ class Workspace(Base):
     onboarding_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     confluence_connected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
+    # Subscription plan
+    plan: Mapped[str] = mapped_column(
+        String, nullable=False, default="trial"
+    )
+    # Trial expiry — None means not on trial
+    trial_ends_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -34,3 +43,19 @@ class Workspace(Base):
         DateTime(timezone=True), nullable=False,
         server_default=func.now(), onupdate=func.now()
     )
+
+    @property
+    def is_trial_expired(self) -> bool:
+        if self.plan != "trial":
+            return False
+        if self.trial_ends_at is None:
+            return True
+        from datetime import timezone
+        return datetime.now(timezone.utc) > self.trial_ends_at
+
+    @property
+    def effective_plan(self) -> str:
+        """Returns 'expired' if trial is over, otherwise the plan name."""
+        if self.plan == "trial" and self.is_trial_expired:
+            return "expired"
+        return self.plan

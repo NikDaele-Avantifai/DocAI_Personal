@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(grep -rn \"useEffect\\\\|isTokenReady\\\\|fetch\\(\\\\`\\\\${API\" /Users/nikolaidaelemans/Documents/docai/apps/dashboard/src/pages/DuplicatesPage.tsx)"
+      "Bash(grep -rn \"useEffect\\\\|isTokenReady\\\\|fetch\\(\\\\`\\\\${API\" /Users/nikolaidaelemans/Documents/docai/apps/dashboard/src/pages/DuplicatesPage.tsx)",
+      "Bash(DATABASE_URL=\"postgresql://nikolaidaelemans:postgres@localhost:5432/doc_ai_db\" python migrate.py)",
+      "Bash(DATABASE_URL=\"postgresql://nikolaidaelemans:postgres@localhost:5432/doc_ai_db\" python migrate.py --list)"
     ]
   }
 }

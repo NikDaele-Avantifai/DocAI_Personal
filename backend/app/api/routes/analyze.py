@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.core.config import settings
+from app.core.auth import get_current_user
+from app.core.usage import check_limit, track_usage
 from app.db.database import get_db
 from app.core.workspace import get_current_workspace
 from app.models.workspace import Workspace
@@ -496,6 +498,7 @@ async def analyze_page(
     force_refresh: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
+    user: dict = Depends(get_current_user),
 ):
     wid = workspace.id
 
@@ -569,6 +572,9 @@ async def analyze_page(
             for r in dismissed_result.scalars().all()
         ]
 
+    # ── Usage gate ────────────────────────────────────────────────────────────
+    await check_limit(db, workspace, "analysis")
+
     # ── Claude call ───────────────────────────────────────────────────────────
     system_prompt = _build_system_prompt(analysis_settings)
     user_message = _build_user_message(body, previous_analysis, analysis_settings, dismissed_list)
@@ -590,6 +596,9 @@ async def analyze_page(
 
     parsed = json.loads(raw)
     parsed = _validate_and_clean(parsed, analysis_settings)
+
+    # ── Track usage after successful Claude call ──────────────────────────────
+    await track_usage(db, workspace, user, "analysis", meta=body.page_id)
 
     issues = [Issue(**raw_issue) for raw_issue in parsed.get("issues", [])]
     resolved = [ResolvedIssue(**r) for r in parsed.get("resolved_issues", [])]
