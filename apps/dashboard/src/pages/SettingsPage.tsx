@@ -12,14 +12,6 @@ interface Profile {
   role: string
 }
 
-interface Integrations {
-  confluenceUrl: string
-  confluenceEmail: string
-  confluenceToken: string
-  anthropicKey: string
-  anthropicModel: string
-  voyageKey: string
-}
 
 interface Preferences {
   threshold: number
@@ -85,18 +77,6 @@ function loadProfile(): Profile {
   catch { return { name: "User", email: "", role: "Admin" } }
 }
 
-function loadIntegrations(): Integrations {
-  try {
-    return {
-      confluenceUrl: "", confluenceEmail: "", confluenceToken: "",
-      anthropicKey: "", anthropicModel: "claude-sonnet-4-20250514",
-      voyageKey: "",
-      ...JSON.parse(localStorage.getItem("docai_integrations") || "{}"),
-    }
-  } catch {
-    return { confluenceUrl: "", confluenceEmail: "", confluenceToken: "", anthropicKey: "", anthropicModel: "claude-sonnet-4-20250514", voyageKey: "" }
-  }
-}
 
 function loadPreferences(): Preferences {
   try {
@@ -188,7 +168,6 @@ function IntegrationsTab() {
   const [confError, setConfError] = useState<string | null>(null)
   const [testStatus, setTestStatus] = useState<"idle" | "testing" | "ok" | "error">("idle")
 
-  // Seed form from workspace on first load
   useEffect(() => {
     if (workspace) {
       setConfForm(f => ({
@@ -229,31 +208,6 @@ function IntegrationsTab() {
     }
   }
 
-  const [form, setForm] = useState<Integrations>(loadIntegrations)
-  const [showTokens, setShowTokens] = useState({ anthropic: false, voyage: false })
-  const [connStatus, setConnStatus] = useState<Record<string, "idle" | "testing" | "ok" | "error">>({
-    anthropic: "idle", voyage: "idle",
-  })
-  const [saved, setSaved] = useState(false)
-
-  function save() {
-    localStorage.setItem("docai_integrations", JSON.stringify(form))
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
-  }
-
-  async function testAnthropic() {
-    setConnStatus(s => ({ ...s, anthropic: "testing" }))
-    await new Promise(r => setTimeout(r, 800))
-    setConnStatus(s => ({ ...s, anthropic: form.anthropicKey.startsWith("sk-ant") ? "ok" : "error" }))
-  }
-
-  async function testVoyage() {
-    setConnStatus(s => ({ ...s, voyage: "testing" }))
-    await new Promise(r => setTimeout(r, 800))
-    setConnStatus(s => ({ ...s, voyage: form.voyageKey.startsWith("pa-") ? "ok" : "error" }))
-  }
-
   function StatusBadge({ status }: { status: "idle" | "testing" | "ok" | "error" }) {
     if (status === "testing") return <span className="conn-testing">⟳ Testing…</span>
     if (status === "ok")      return <span className="conn-ok">✓ Connected</span>
@@ -265,10 +219,9 @@ function IntegrationsTab() {
     <div className="settings-section">
       <div className="settings-section-header">
         <h2 className="settings-section-title">Integrations</h2>
-        <p className="settings-section-sub">Connect DocAI to your tools.</p>
+        <p className="settings-section-sub">Connect DocAI to your Confluence workspace.</p>
       </div>
 
-      {/* Confluence Connection — workspace-backed */}
       <div className="settings-integration-block">
         <div className="settings-integration-header">
           <div className="settings-integration-icon">C</div>
@@ -324,7 +277,7 @@ function IntegrationsTab() {
 
         {confError && <div className="settings-error-msg">{confError}</div>}
 
-        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+        <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center" }}>
           <button
             className="settings-save-btn"
             style={{ marginTop: 0 }}
@@ -341,93 +294,6 @@ function IntegrationsTab() {
           <StatusBadge status={testStatus} />
         </div>
       </div>
-
-      {/* Anthropic */}
-      <div className="settings-integration-block">
-        <div className="settings-integration-header">
-          <div className="settings-integration-icon" style={{ background: "linear-gradient(135deg, #D97706, #F59E0B)" }}>A</div>
-          <div>
-            <div className="settings-integration-name">Anthropic Claude</div>
-            <div className="settings-integration-sub">AI model for analysis and merge proposals</div>
-          </div>
-          <StatusBadge status={connStatus.anthropic} />
-        </div>
-
-        <div className="settings-fields">
-          <div className="settings-field">
-            <label className="settings-label">API Key</label>
-            <div className="settings-input-wrap">
-              <input
-                className="settings-input"
-                type={showTokens.anthropic ? "text" : "password"}
-                value={form.anthropicKey}
-                onChange={e => setForm(f => ({ ...f, anthropicKey: e.target.value }))}
-                placeholder="sk-ant-api03-…"
-              />
-              <button
-                className="settings-toggle-btn"
-                onClick={() => setShowTokens(s => ({ ...s, anthropic: !s.anthropic }))}>
-                {showTokens.anthropic ? "Hide" : "Show"}
-              </button>
-            </div>
-          </div>
-          <div className="settings-field">
-            <label className="settings-label">Model</label>
-            <select
-              className="settings-select"
-              value={form.anthropicModel}
-              onChange={e => setForm(f => ({ ...f, anthropicModel: e.target.value }))}>
-              <option value="claude-sonnet-4-20250514">claude-sonnet-4-20250514 (recommended)</option>
-              <option value="claude-opus-4-20250514">claude-opus-4-20250514</option>
-              <option value="claude-haiku-4-5-20251001">claude-haiku-4-5-20251001 (fast)</option>
-            </select>
-          </div>
-        </div>
-        <button className="settings-test-btn" onClick={testAnthropic}
-          disabled={connStatus.anthropic === "testing"}>
-          Test Key
-        </button>
-      </div>
-
-      {/* Voyage */}
-      <div className="settings-integration-block">
-        <div className="settings-integration-header">
-          <div className="settings-integration-icon" style={{ background: "linear-gradient(135deg, #6366F1, #818CF8)" }}>V</div>
-          <div>
-            <div className="settings-integration-name">Voyage AI</div>
-            <div className="settings-integration-sub">Semantic embeddings for duplicate detection</div>
-          </div>
-          <StatusBadge status={connStatus.voyage} />
-        </div>
-
-        <div className="settings-fields">
-          <div className="settings-field">
-            <label className="settings-label">API Key</label>
-            <div className="settings-input-wrap">
-              <input
-                className="settings-input"
-                type={showTokens.voyage ? "text" : "password"}
-                value={form.voyageKey}
-                onChange={e => setForm(f => ({ ...f, voyageKey: e.target.value }))}
-                placeholder="pa-…"
-              />
-              <button
-                className="settings-toggle-btn"
-                onClick={() => setShowTokens(s => ({ ...s, voyage: !s.voyage }))}>
-                {showTokens.voyage ? "Hide" : "Show"}
-              </button>
-            </div>
-          </div>
-        </div>
-        <button className="settings-test-btn" onClick={testVoyage}
-          disabled={connStatus.voyage === "testing"}>
-          Test Key
-        </button>
-      </div>
-
-      <button className="settings-save-btn" onClick={save}>
-        {saved ? "✓ Saved" : "Save Integrations"}
-      </button>
     </div>
   )
 }
