@@ -4,7 +4,7 @@ import "./SettingsPage.css"
 import { apiClient, API_BASE } from '@/lib/api'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
 
-type Tab = "profile" | "integrations" | "preferences" | "analysis" | "privacy" | "about"
+type Tab = "overview" | "profile" | "integrations" | "preferences" | "analysis" | "privacy" | "about"
 
 interface Profile {
   name: string
@@ -63,14 +63,40 @@ const FOCUS_OPTIONS: { id: AnalysisSettingsData["focus_mode"]; label: string; de
   { id: "hygiene",    label: "Hygiene",    description: "Targets stale content, outdated references, and broken links — keeps docs fresh." },
 ]
 
-const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: "profile",      label: "Profile",      icon: "👤" },
-  { id: "integrations", label: "Integrations", icon: "🔗" },
-  { id: "preferences",  label: "Preferences",  icon: "⚙" },
-  { id: "analysis",     label: "Analysis",     icon: "⚙" },
-  { id: "privacy",      label: "Privacy",      icon: "🔒" },
-  { id: "about",        label: "About",        icon: "ℹ" },
+const OVERVIEW_ITEMS: { tab: Exclude<Tab, "overview">; label: string; description: string; icon: string }[] = [
+  { tab: "profile",      label: "Profile",      description: "Your name, email, and role within DocAI.",                          icon: "◉" },
+  { tab: "integrations", label: "Integrations", description: "Connect DocAI to your Atlassian Confluence workspace.",             icon: "⌁" },
+  { tab: "preferences",  label: "Preferences",  description: "Similarity thresholds, sync frequency, and notifications.",        icon: "◎" },
+  { tab: "analysis",     label: "Analysis",     description: "Issue detectors, confidence threshold, and focus mode.",           icon: "◈" },
+  { tab: "privacy",      label: "Privacy",      description: "How DocAI handles your data and what stays on your device.",       icon: "⛨" },
+  { tab: "about",        label: "About",        description: "Version info, API health status, and tech stack.",                 icon: "ℹ" },
 ]
+
+function OverviewTab({ onNavigate }: { onNavigate: (tab: Tab) => void }) {
+  return (
+    <div className="settings-section" style={{ maxWidth: 700 }}>
+      <div className="settings-section-header">
+        <h2 className="settings-section-title">Settings</h2>
+        <p className="settings-section-sub">Manage your workspace, integrations, and preferences.</p>
+      </div>
+      <div className="settings-overview-grid">
+        {OVERVIEW_ITEMS.map(item => (
+          <button
+            key={item.tab}
+            className="settings-overview-card"
+            onClick={() => onNavigate(item.tab)}>
+            <span className="settings-overview-icon">{item.icon}</span>
+            <div className="settings-overview-card-body">
+              <div className="settings-overview-card-label">{item.label}</div>
+              <div className="settings-overview-card-desc">{item.description}</div>
+            </div>
+            <span className="settings-overview-arrow">›</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 function loadProfile(): Profile {
   try { return { name: "User", email: "", role: "Admin", ...JSON.parse(localStorage.getItem("docai_profile") || "{}") } }
@@ -757,10 +783,10 @@ export default function SettingsPage() {
   const isOnboarding = (location.state as any)?.onboarding === true
 
   // When redirected from onboarding, land on the integrations tab
-  const activeTab: Tab = (tab as Tab) ?? (isOnboarding ? "integrations" : "profile")
+  const activeTab: Tab = (tab as Tab) ?? (isOnboarding ? "integrations" : "overview")
 
   function setTab(t: Tab) {
-    navigate(`/settings/${t}`, { replace: true })
+    navigate(t === "overview" ? "/settings" : `/settings/${t}`, { replace: true })
   }
 
   return (
@@ -772,19 +798,8 @@ export default function SettingsPage() {
         </div>
       )}
 
-      <div className="settings-tabs-bar">
-        {TABS.map(t => (
-          <button
-            key={t.id}
-            className={`settings-tab${activeTab === t.id ? " active" : ""}`}
-            onClick={() => setTab(t.id)}>
-            <span className="settings-tab-icon">{t.icon}</span>
-            {t.label}
-          </button>
-        ))}
-      </div>
-
       <div className="settings-content">
+        {activeTab === "overview"     && <OverviewTab onNavigate={setTab} />}
         {activeTab === "profile"      && <ProfileTab />}
         {activeTab === "integrations" && <IntegrationsTab />}
         {activeTab === "preferences"  && <PreferencesTab />}

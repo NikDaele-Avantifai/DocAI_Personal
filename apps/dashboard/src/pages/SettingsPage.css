@@ -4,43 +4,67 @@
   height: 100%;
 }
 
-/* ── Tabs bar ── */
-.settings-tabs-bar {
+/* ── Overview grid ── */
+.settings-overview-grid {
   display: flex;
-  gap: 2px;
-  padding: 0 32px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-white);
-  flex-shrink: 0;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.settings-tab {
+.settings-overview-card {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 14px 16px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-2);
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
+  gap: 14px;
+  padding: 14px 18px;
+  background: var(--bg-white);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm);
   cursor: pointer;
-  transition: all 0.15s;
   font-family: inherit;
-  margin-bottom: -1px;
-  white-space: nowrap;
+  text-align: left;
+  width: 100%;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
-.settings-tab:hover { color: var(--text-1); }
-
-.settings-tab.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-  font-weight: 600;
+.settings-overview-card:hover {
+  border-color: var(--border-2);
+  box-shadow: var(--shadow-md);
 }
 
-.settings-tab-icon { font-size: 14px; }
+.settings-overview-icon {
+  font-size: 18px;
+  color: var(--text-3);
+  width: 28px;
+  text-align: center;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.settings-overview-card-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-overview-card-label {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-1);
+  margin-bottom: 2px;
+}
+
+.settings-overview-card-desc {
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.45;
+}
+
+.settings-overview-arrow {
+  font-size: 18px;
+  color: var(--text-4);
+  flex-shrink: 0;
+  line-height: 1;
+}
 
 /* ── Content area ── */
 .settings-content {

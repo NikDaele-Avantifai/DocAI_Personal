@@ -18,6 +18,8 @@ import PagesPage from "./pages/PagesPage"
 import BatchPage from "./pages/BatchPage"
 import DuplicatesPage from "./pages/DuplicatesPage"
 import SettingsPage from "./pages/SettingsPage"
+import UsagePage from "./pages/UsagePage"
+import SettingsLayout from "./components/SettingsLayout"
 
 /** Redirects to /settings if Confluence is not yet connected and onboarding is incomplete. */
 function OnboardingGuard({ children }: { children: React.ReactNode }) {
@@ -59,7 +61,7 @@ function App({ bypassAuth = false }: AppProps) {
                 {/* Public */}
                 <Route path="/login" element={<LoginPage />} />
 
-                {/* Protected — everything under Layout */}
+                {/* Protected — main app under Layout */}
                 <Route element={wrap(<Layout />)}>
                   <Route index element={<Navigate to="/overview" replace />} />
                   <Route path="/overview"      element={<OverviewPage />} />
@@ -71,8 +73,15 @@ function App({ bypassAuth = false }: AppProps) {
                   <Route path="/audit"         element={<AuditPage />} />
                   <Route path="/batch-rename"  element={<BatchPage />} />
                   <Route path="/batch"         element={<Navigate to="/batch-rename" replace />} />
-                  <Route path="/settings"      element={<SettingsPage />} />
-                  <Route path="/settings/:tab" element={<SettingsPage />} />
+                  {/* Legacy /usage redirect → settings/usage */}
+                  <Route path="/usage"         element={<Navigate to="/settings/usage" replace />} />
+                </Route>
+
+                {/* Protected — settings under SettingsLayout */}
+                <Route element={wrap(<SettingsLayout />)}>
+                  <Route path="/settings"              element={<SettingsPage />} />
+                  <Route path="/settings/usage"        element={<UsagePage />} />
+                  <Route path="/settings/:tab"         element={<SettingsPage />} />
                 </Route>
               </Routes>
 
