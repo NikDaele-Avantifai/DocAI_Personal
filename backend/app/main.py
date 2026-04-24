@@ -46,6 +46,7 @@ def _init_sentry() -> None:
             FastApiIntegration(transaction_style="endpoint"),
             SqlalchemyIntegration(),
         ],
+        default_integrations=False,  # prevents auto-scan that breaks on langchain/pydantic-v1
         traces_sample_rate=0.1,
         send_default_pii=False,
         before_send=_scrub_event,
