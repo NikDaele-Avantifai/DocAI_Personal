@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react"
 import { useParams, useNavigate, useLocation } from "react-router-dom"
+import * as Sentry from "@sentry/react"
 import "./SettingsPage.css"
 import { apiClient, API_BASE } from '@/lib/api'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
@@ -194,27 +195,37 @@ function IntegrationsTab() {
   const [confError, setConfError] = useState<string | null>(null)
   const [testStatus, setTestStatus] = useState<"idle" | "testing" | "ok" | "error">("idle")
 
+  // Pre-populate form whenever workspace data is available or changes
   useEffect(() => {
     if (workspace) {
       setConfForm(f => ({
         ...f,
         base_url: workspace.confluence_base_url ?? "",
-        email: workspace.confluence_email ?? "",
+        email:    workspace.confluence_email    ?? "",
+        // api_token always starts empty — never returned from API
+        api_token: "",
       }))
     }
-  }, [workspace?.id])
+  }, [workspace?.id, workspace?.confluence_base_url, workspace?.confluence_email])
+
+  const isConnected = workspace?.confluence_connected ?? false
 
   async function saveConfluence() {
     setConfSaving(true)
     setConfError(null)
     try {
-      await apiClient.patch("/api/workspace/confluence", {
+      const payload: Record<string, string> = {
         base_url: confForm.base_url,
-        email: confForm.email,
-        ...(confForm.api_token ? { api_token: confForm.api_token } : {}),
-      })
+        email:    confForm.email,
+      }
+      // Only send api_token if user typed something new
+      if (confForm.api_token.trim()) {
+        payload.api_token = confForm.api_token
+      }
+      await apiClient.patch("/api/workspace/confluence", payload)
       await refetch()
       setConfSaved(true)
+      // Clear token field after save — it is never returned by the API
       setConfForm(f => ({ ...f, api_token: "" }))
       setTimeout(() => setConfSaved(false), 2500)
     } catch (err: any) {
@@ -234,10 +245,10 @@ function IntegrationsTab() {
     }
   }
 
-  function StatusBadge({ status }: { status: "idle" | "testing" | "ok" | "error" }) {
-    if (status === "testing") return <span className="conn-testing">⟳ Testing…</span>
-    if (status === "ok")      return <span className="conn-ok">✓ Connected</span>
-    if (status === "error")   return <span className="conn-error">✕ Failed</span>
+  function TestBadge() {
+    if (testStatus === "testing") return <span className="conn-testing">⟳ Testing…</span>
+    if (testStatus === "ok")      return <span className="conn-ok">✓ Connected</span>
+    if (testStatus === "error")   return <span className="conn-error">✕ Failed</span>
     return null
   }
 
@@ -255,7 +266,7 @@ function IntegrationsTab() {
             <div className="settings-integration-name">Confluence</div>
             <div className="settings-integration-sub">Connect to your Atlassian Confluence workspace</div>
           </div>
-          {workspace?.confluence_connected
+          {isConnected
             ? <span className="conn-ok">✓ Connected</span>
             : <span className="conn-error">Not connected</span>}
         </div>
@@ -282,7 +293,7 @@ function IntegrationsTab() {
           </div>
           <div className="settings-field">
             <label className="settings-label">
-              API Token{workspace?.confluence_connected ? " (leave blank to keep existing)" : ""}
+              API Token{isConnected ? " — leave blank to keep existing token" : ""}
             </label>
             <div className="settings-input-wrap">
               <input
@@ -290,7 +301,7 @@ function IntegrationsTab() {
                 type={showToken ? "text" : "password"}
                 value={confForm.api_token}
                 onChange={e => setConfForm(f => ({ ...f, api_token: e.target.value }))}
-                placeholder={workspace?.confluence_connected ? "••••••••" : "ATATT3x…"}
+                placeholder={isConnected ? "••••••••••••• (saved)" : "ATATT3x…"}
               />
               <button
                 className="settings-toggle-btn"
@@ -309,15 +320,15 @@ function IntegrationsTab() {
             style={{ marginTop: 0 }}
             onClick={saveConfluence}
             disabled={confSaving}>
-            {confSaving ? "Saving…" : confSaved ? "✓ Saved" : "Save"}
+            {confSaving ? "Saving…" : confSaved ? "✓ Confluence connection saved" : isConnected ? "Update connection" : "Save & Connect"}
           </button>
           <button
             className="settings-test-btn"
             onClick={testConfluence}
-            disabled={testStatus === "testing" || !workspace?.confluence_connected}>
+            disabled={testStatus === "testing" || !isConnected}>
             Test Connection
           </button>
-          <StatusBadge status={testStatus} />
+          <TestBadge />
         </div>
       </div>
     </div>
@@ -769,6 +780,25 @@ function AboutTab() {
         <div className="settings-about-row">
           <span className="settings-about-label">Embeddings</span>
           <span className="settings-about-value">Voyage AI (voyage-3)</span>
+        </div>
+        <div className="settings-about-row">
+          <span className="settings-about-label">Error Monitoring</span>
+          <span className="settings-about-value">Sentry</span>
+        </div>
+      </div>
+
+      <div className="settings-subsection-title" style={{ marginTop: 8 }}>Diagnostics</div>
+      <div className="settings-fields">
+        <div className="settings-field">
+          <label className="settings-label">Sentry error tracking</label>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <button
+              className="settings-test-btn"
+              onClick={() => { throw new Error("Sentry test error from DocAI About page") }}>
+              Send test error
+            </button>
+            <span className="settings-slider-hint">Throws a test exception to verify Sentry is receiving events.</span>
+          </div>
         </div>
       </div>
     </div>

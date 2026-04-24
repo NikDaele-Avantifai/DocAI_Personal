@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     atlassian_api_token: str = ""
     atlassian_mail: str = ""
 
+    # Admin monitoring (internal use only — not customer-facing)
+    admin_secret_token: str = ""
+
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"

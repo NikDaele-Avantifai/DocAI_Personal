@@ -12,7 +12,7 @@ from app.core.rate_limit import auth_limiter, api_limiter
 from app.api.routes import (
     health, confluence, proposals, audit, analyze, edit,
     stats, batch, rollback, duplicates, sync, chat,
-    analysis_settings, sweep, dismissed, workspace, usage
+    analysis_settings, sweep, dismissed, workspace, usage, admin
 )
 from app.db.database import init_db
 
@@ -105,6 +105,7 @@ app.include_router(sweep.router,             prefix="/api/sweep",       tags=["s
 app.include_router(dismissed.router,         prefix="/api/pages",       tags=["dismissed"],   dependencies=_auth)
 app.include_router(workspace.router,         prefix="/api/workspace",   tags=["workspace"],   dependencies=_auth)
 app.include_router(usage.router,             prefix="/api/usage",       tags=["usage"],       dependencies=_auth)
+app.include_router(admin.router,             prefix="/api/admin",       tags=["admin"])  # auth handled by X-Admin-Token header
 
 
 # ── Global exception handler — never leak stack traces in production ───────────

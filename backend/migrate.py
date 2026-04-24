@@ -110,6 +110,13 @@ MIGRATIONS = [
             "CREATE INDEX IF NOT EXISTS ix_usage_events_user_sub ON usage_events(user_sub)",
         ]
     ),
+    (
+        '003_clear_encrypted_tokens_after_key_hardening',
+        'Clear Confluence tokens after encryption key hardening (users must re-enter)',
+        [
+            "UPDATE workspaces SET confluence_api_token_enc = NULL, confluence_connected = FALSE WHERE confluence_api_token_enc IS NOT NULL",
+        ]
+    ),
 ]
 
 # ── Runner ────────────────────────────────────────────────────────────────────
