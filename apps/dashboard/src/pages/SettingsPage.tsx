@@ -787,37 +787,37 @@ function AboutTab() {
         </div>
       </div>
 
-      <DiagnosticsSection />
+      {/* <DiagnosticsSection /> */}
     </div>
   )
 }
 
-function DiagnosticsSection() {
-  const [triggered, setTriggered] = useState(false)
+// function DiagnosticsSection() {
+//   const [triggered, setTriggered] = useState(false)
 
-  function handleTest() {
-    setTriggered(true)
-    Sentry.captureException(new Error("Sentry test error from DocAI About page"))
-    setTimeout(() => setTriggered(false), 3000)
-  }
+//   function handleTest() {
+//     setTriggered(true)
+//     Sentry.captureException(new Error("Sentry test error from DocAI About page"))
+//     setTimeout(() => setTriggered(false), 3000)
+//   }
 
-  return (
-    <div className="settings-fields" style={{ marginTop: 4 }}>
-      <div className="settings-subsection-title">Diagnostics</div>
-      <div className="settings-field">
-        <label className="settings-label">Error reporting</label>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <button className="settings-test-btn" onClick={handleTest}>
-            {triggered ? "✓ Test event sent" : "Send test error"}
-          </button>
-          <span className="settings-slider-hint">
-            Sends a test event to Sentry to verify error reporting is working.
-          </span>
-        </div>
-      </div>
-    </div>
-  )
-}
+//   return (
+//     <div className="settings-fields" style={{ marginTop: 4 }}>
+//       <div className="settings-subsection-title">Diagnostics</div>
+//       <div className="settings-field">
+//         <label className="settings-label">Error reporting</label>
+//         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+//           <button className="settings-test-btn" onClick={handleTest}>
+//             {triggered ? "✓ Test event sent" : "Send test error"}
+//           </button>
+//           <span className="settings-slider-hint">
+//             Sends a test event to Sentry to verify error reporting is working.
+//           </span>
+//         </div>
+//       </div>
+//     </div>
+//   )
+// }
 
 // ── Main Page ──────────────────────────────────────────────────────────────────
 export default function SettingsPage() {

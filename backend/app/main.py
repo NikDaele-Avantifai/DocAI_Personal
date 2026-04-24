@@ -1,6 +1,9 @@
 from contextlib import asynccontextmanager
 import logging
 
+import sentry_sdk
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -17,6 +20,43 @@ from app.api.routes import (
 from app.db.database import init_db
 
 logger = logging.getLogger(__name__)
+
+
+# ── Sentry ────────────────────────────────────────────────────────────────────
+
+def _scrub_event(event: dict, hint: dict) -> dict:  # noqa: ARG001
+    """Strip auth tokens and API keys before sending to Sentry."""
+    try:
+        headers = event.get("request", {}).get("headers", {})
+        for sensitive in ["authorization", "x-admin-token", "cookie"]:
+            if sensitive in headers:
+                headers[sensitive] = "[Filtered]"
+    except Exception:
+        pass
+    return event
+
+
+def _init_sentry() -> None:
+    if not settings.sentry_dsn:
+        return
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        environment="production" if settings.is_production else "development",
+        integrations=[
+            FastApiIntegration(transaction_style="endpoint"),
+            SqlalchemyIntegration(),
+        ],
+        traces_sample_rate=0.1,
+        send_default_pii=False,
+        before_send=_scrub_event,
+    )
+    logger.info(
+        "Sentry initialized for environment: %s",
+        "production" if settings.is_production else "development",
+    )
+
+
+_init_sentry()
 
 
 @asynccontextmanager
@@ -83,6 +123,13 @@ async def rate_limit_middleware(request: Request, call_next):
         )
 
     return await call_next(request)
+
+# ── Sentry debug route (dev only — not registered in production) ──────────────
+if not settings.is_production:
+    @app.get("/sentry-debug", tags=["debug"])
+    async def sentry_debug():
+        """Triggers a ZeroDivisionError to verify Sentry is receiving events."""
+        return 1 / 0
 
 # ── Auth dependency (applied to all non-health routes) ────────────────────────
 _auth = [Depends(get_current_user)]

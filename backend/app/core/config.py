@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     # Admin monitoring (internal use only — not customer-facing)
     admin_secret_token: str = ""
 
+    # Sentry error monitoring
+    sentry_dsn: str = "https://ee3b761f288e69aff4a556e5d8b5e371@o4511274574348288.ingest.de.sentry.io/4511274704568400"
+
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
