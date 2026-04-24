@@ -787,18 +787,32 @@ function AboutTab() {
         </div>
       </div>
 
-      <div className="settings-subsection-title" style={{ marginTop: 8 }}>Diagnostics</div>
-      <div className="settings-fields">
-        <div className="settings-field">
-          <label className="settings-label">Sentry error tracking</label>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <button
-              className="settings-test-btn"
-              onClick={() => { throw new Error("Sentry test error from DocAI About page") }}>
-              Send test error
-            </button>
-            <span className="settings-slider-hint">Throws a test exception to verify Sentry is receiving events.</span>
-          </div>
+      <DiagnosticsSection />
+    </div>
+  )
+}
+
+function DiagnosticsSection() {
+  const [triggered, setTriggered] = useState(false)
+
+  function handleTest() {
+    setTriggered(true)
+    Sentry.captureException(new Error("Sentry test error from DocAI About page"))
+    setTimeout(() => setTriggered(false), 3000)
+  }
+
+  return (
+    <div className="settings-fields" style={{ marginTop: 4 }}>
+      <div className="settings-subsection-title">Diagnostics</div>
+      <div className="settings-field">
+        <label className="settings-label">Error reporting</label>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button className="settings-test-btn" onClick={handleTest}>
+            {triggered ? "✓ Test event sent" : "Send test error"}
+          </button>
+          <span className="settings-slider-hint">
+            Sends a test event to Sentry to verify error reporting is working.
+          </span>
         </div>
       </div>
     </div>

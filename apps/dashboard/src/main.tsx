@@ -1,28 +1,31 @@
+import * as Sentry from "@sentry/react"
 import React from "react"
 import ReactDOM from "react-dom/client"
 import { BrowserRouter } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { Auth0Provider } from "@auth0/auth0-react"
-import * as Sentry from "@sentry/react"
 import App from "./App"
 import "./index.css"
 
-Sentry.init({
-  dsn: "https://370cc957243b9b58881ade4a85e55256@o4511274574348288.ingest.de.sentry.io/4511274576707664",
-  environment: import.meta.env.MODE,
-  enabled: import.meta.env.PROD,
-  sendDefaultPii: true,
-  integrations: [
-    Sentry.browserTracingIntegration(),
-    Sentry.replayIntegration({
-      maskAllText: false,
-      blockAllMedia: false,
-    }),
-  ],
-  tracesSampleRate: 0.2,
-  replaysSessionSampleRate: 0.1,
-  replaysOnErrorSampleRate: 1.0,
-})
+const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN as string | undefined
+
+if (SENTRY_DSN) {
+  Sentry.init({
+    dsn: SENTRY_DSN,
+    environment: import.meta.env.PROD ? "production" : "development",
+    integrations: [
+      Sentry.browserTracingIntegration(),
+    ],
+    tracesSampleRate: 0.1,
+    sendDefaultPii: false,
+    beforeSend(event) {
+      if (event.request?.headers?.["Authorization"]) {
+        event.request.headers["Authorization"] = "[Filtered]"
+      }
+      return event
+    },
+  })
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -78,7 +81,50 @@ function Root() {
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <Sentry.ErrorBoundary fallback={<p>Something went wrong.</p>}>
+    <Sentry.ErrorBoundary
+      fallback={
+        <div style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          height: "100vh",
+          gap: "12px",
+          fontFamily: "Manrope, sans-serif",
+          color: "#3D5166",
+          background: "#F7F9FB",
+        }}>
+          <div style={{ fontSize: "32px", marginBottom: "4px" }}>⚠</div>
+          <div style={{
+            fontSize: "18px",
+            fontWeight: 700,
+            color: "#0D1B2A",
+            fontFamily: "Nunito Sans, sans-serif",
+          }}>
+            Something went wrong
+          </div>
+          <div style={{ fontSize: "14px", color: "#7A96AE" }}>
+            Our team has been notified automatically.
+          </div>
+          <button
+            onClick={() => window.location.reload()}
+            style={{
+              marginTop: "12px",
+              padding: "10px 24px",
+              background: "#1A2E44",
+              color: "white",
+              border: "none",
+              borderRadius: "6px",
+              cursor: "pointer",
+              fontSize: "13px",
+              fontFamily: "Manrope, sans-serif",
+              fontWeight: 500,
+            }}>
+            Refresh page
+          </button>
+        </div>
+      }
+    >
       <Root />
     </Sentry.ErrorBoundary>
   </React.StrictMode>,
