@@ -90,19 +90,25 @@ app.add_middleware(
 app.add_middleware(RequestSizeLimitMiddleware, max_bytes=10 * 1024 * 1024)
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
-origins = (
-    ["http://localhost:3000", "http://localhost:5173"]
-    if not settings.is_production
-    else ["https://app.avantifai.com"]
-)
+origins_list = []
+
+if settings.is_production:
+    origins_list = ["https://app.avantifai.com"]
+    # Add staging frontend if configured
+    if settings.frontend_url:
+        origins_list.append(settings.frontend_url)
+elif settings.frontend_url:
+    origins_list = [settings.frontend_url, "http://localhost:3000", "http://localhost:5173"]
+else:
+    origins_list = ["http://localhost:3000", "http://localhost:5173"]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=origins_list,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
-    max_age=600,  # Cache preflight for 10 minutes
+    max_age=600,
 )
 
 # ── IP rate limiting on all routes ────────────────────────────────────────────

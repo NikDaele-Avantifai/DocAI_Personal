@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     atlassian_api_token: str = ""
     atlassian_mail: str = ""
 
+    # Frontend URL override (for staging / custom deployments)
+    frontend_url: str = ""
+
     # Admin monitoring (internal use only — not customer-facing)
     admin_secret_token: str = ""
 
