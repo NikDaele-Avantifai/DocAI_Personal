@@ -7,6 +7,7 @@ import { useAuth } from "../contexts/AuthContext"
 const SETTINGS_NAV = [
   { to: "/settings",                  label: "Overview",     icon: "⬡", end: true  },
   { to: "/settings/profile",          label: "Profile",      icon: "◉"              },
+  { to: "/settings/team",             label: "Team",         icon: "⊞"              },
   { to: "/settings/integrations",     label: "Integrations", icon: "⌁"              },
   { to: "/settings/preferences",      label: "Preferences",  icon: "◎"              },
   { to: "/settings/usage",            label: "Usage",        icon: "∥"              },

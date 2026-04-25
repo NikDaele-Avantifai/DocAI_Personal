@@ -44,6 +44,7 @@ async def init_db() -> None:
     from app.models.sweep import WorkspaceSweep                          # noqa: F401 — registers WorkspaceSweep
     from app.models.dismissed_issue import DismissedIssue               # noqa: F401 — registers DismissedIssue
     from app.models.usage import WorkspaceUsage, UsageEvent              # noqa: F401 — registers usage tables
+    from app.models.workspace_member import WorkspaceMember, WorkspaceInvite  # noqa: F401 — registers member tables
 
     try:
         async with engine.begin() as conn:

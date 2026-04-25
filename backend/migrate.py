@@ -111,6 +111,43 @@ MIGRATIONS = [
         ]
     ),
     (
+        '005_workspace_members_and_invites',
+        'Add workspace members and invitations tables',
+        [
+            """CREATE TABLE IF NOT EXISTS workspace_members (
+                id SERIAL PRIMARY KEY,
+                workspace_id VARCHAR NOT NULL,
+                user_sub VARCHAR NOT NULL,
+                user_email VARCHAR NOT NULL,
+                role VARCHAR NOT NULL DEFAULT 'viewer',
+                invited_by_sub VARCHAR NOT NULL,
+                invited_by_email VARCHAR,
+                joined_at TIMESTAMPTZ DEFAULT NOW(),
+                CONSTRAINT uq_workspace_members_workspace_user
+                    UNIQUE (workspace_id, user_sub)
+            )""",
+            "CREATE INDEX IF NOT EXISTS ix_workspace_members_workspace_id ON workspace_members(workspace_id)",
+            "CREATE INDEX IF NOT EXISTS ix_workspace_members_user_sub ON workspace_members(user_sub)",
+            """CREATE TABLE IF NOT EXISTS workspace_invites (
+                id SERIAL PRIMARY KEY,
+                workspace_id VARCHAR NOT NULL,
+                email VARCHAR NOT NULL,
+                role VARCHAR NOT NULL DEFAULT 'viewer',
+                token VARCHAR NOT NULL UNIQUE,
+                invited_by_sub VARCHAR NOT NULL,
+                invited_by_email VARCHAR,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                expires_at TIMESTAMPTZ NOT NULL,
+                accepted BOOLEAN NOT NULL DEFAULT FALSE,
+                accepted_at TIMESTAMPTZ,
+                CONSTRAINT uq_workspace_invites_workspace_email
+                    UNIQUE (workspace_id, email)
+            )""",
+            "CREATE INDEX IF NOT EXISTS ix_workspace_invites_workspace_id ON workspace_invites(workspace_id)",
+            "CREATE INDEX IF NOT EXISTS ix_workspace_invites_email ON workspace_invites(email)",
+        ]
+    ),
+    (
         '004_workspace_member_roles',
         'Add default_member_role to workspaces for future member management',
         [

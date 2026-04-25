@@ -45,6 +45,8 @@ async def check_limit(
     """
     Raises HTTP 402 if the trial has expired.
     Raises HTTP 429 if the workspace has hit its monthly limit.
+    Uses SELECT FOR UPDATE to prevent race conditions where two simultaneous
+    requests both pass the limit check before either increments the counter.
     Returns normally if the action is allowed.
     """
     plan = workspace.effective_plan
@@ -60,7 +62,24 @@ async def check_limit(
             }
         )
 
-    usage = await get_or_create_usage(db, workspace.id)
+    period = _current_period()
+
+    # SELECT FOR UPDATE locks the row so two simultaneous requests can't both
+    # pass the limit check before either increments the counter.
+    result = await db.execute(
+        select(WorkspaceUsage)
+        .where(
+            WorkspaceUsage.workspace_id == workspace.id,
+            WorkspaceUsage.period == period,
+        )
+        .with_for_update()
+    )
+    usage = result.scalar_one_or_none()
+
+    if usage is None:
+        usage = WorkspaceUsage(workspace_id=workspace.id, period=period)
+        db.add(usage)
+        await db.flush()
 
     limit_map = {
         "analysis": (limits.analyses_per_month, usage.analyses_count),
@@ -95,9 +114,13 @@ async def check_limit(
                 "action": action,
                 "limit": limit,
                 "used": current,
-                "period": _current_period(),
-                "message": f"Monthly {action} limit reached ({current}/{limit}). "
-                           f"Upgrade your plan or wait until next month.",
+                "period": period,
+                "reset_date": _next_period_start(),
+                "message": (
+                    f"Monthly {action} limit reached ({current}/{limit}). "
+                    f"Resets on {_next_period_start()}. "
+                    f"Upgrade your plan for more capacity."
+                ),
                 "upgrade_contact": "nikolaidaelemans@avantifai.com",
             }
         )
@@ -133,6 +156,16 @@ async def track_usage(
         meta=meta,
     )
     db.add(event)
+
+
+def _next_period_start() -> str:
+    from calendar import monthrange
+    now = datetime.now(timezone.utc)
+    if now.month == 12:
+        next_month = datetime(now.year + 1, 1, 1, tzinfo=timezone.utc)
+    else:
+        next_month = datetime(now.year, now.month + 1, 1, tzinfo=timezone.utc)
+    return next_month.strftime("%Y-%m-%d")
 
 
 def get_usage_percentage(current: int, limit: int | None) -> float | None:

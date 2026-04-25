@@ -14,6 +14,10 @@ interface Workspace {
   updated_at: string
   user_role: 'admin' | 'viewer'
   user_roles: string[]
+  plan: string
+  effective_plan: string
+  trial_ends_at: string | null
+  is_owner: boolean
 }
 
 interface WorkspaceContextValue {

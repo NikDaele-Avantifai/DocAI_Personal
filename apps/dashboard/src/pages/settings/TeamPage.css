@@ -1,0 +1,251 @@
+.team-page {
+  padding: 24px 32px 40px;
+  max-width: 800px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.team-header {
+  padding-bottom: 4px;
+}
+
+.team-title {
+  font-size: 22px;
+  font-weight: 800;
+  font-family: 'Nunito Sans', sans-serif;
+  color: #0D1B2A;
+  letter-spacing: -0.3px;
+  margin: 0 0 4px;
+}
+
+.team-subtitle {
+  font-size: 13px;
+  color: var(--text-3);
+  margin: 0;
+}
+
+.team-loading {
+  font-size: 13px;
+  color: var(--text-3);
+  padding: 20px 0;
+}
+
+/* ── Members list ── */
+.team-members-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.team-member-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 18px;
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+}
+
+.team-member-row:last-child {
+  border-bottom: none;
+}
+
+.team-member-email {
+  font-size: 13px;
+  color: var(--text-1);
+  font-weight: 500;
+}
+
+.team-member-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.team-empty-row {
+  padding: 16px 18px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+/* ── Role badges ── */
+.team-role-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.team-role-badge-admin {
+  background: var(--accent-light, #dbeafe);
+  color: var(--accent, #1e40af);
+}
+
+.team-role-badge-viewer {
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+
+.team-owner-tag {
+  font-size: 11px;
+  color: var(--text-3);
+  font-weight: 500;
+}
+
+.team-expires {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+/* ── Role select & remove ── */
+.team-role-select {
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text-1);
+  background: var(--bg-white);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+
+.team-remove-btn {
+  font-size: 12px;
+  font-family: inherit;
+  font-weight: 500;
+  color: var(--text-3);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.team-remove-btn:hover:not(:disabled) {
+  color: #b91c1c;
+  border-color: #fca5a5;
+}
+
+.team-remove-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ── Invite form ── */
+.team-invite-body {
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.team-auth0-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 12.5px;
+  color: #92400e;
+  line-height: 1.5;
+}
+
+.team-auth0-notice-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.team-auth0-notice a {
+  color: #92400e;
+  text-decoration: underline;
+}
+
+.team-invite-fields {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.team-invite-input {
+  flex: 1;
+  min-width: 200px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text-1);
+  background: var(--bg-white);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.team-invite-input:focus {
+  border-color: var(--accent);
+}
+
+.team-invite-select {
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text-1);
+  background: var(--bg-white);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+
+.team-invite-btn {
+  font-size: 13px;
+  font-family: inherit;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  padding: 7px 16px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.team-invite-btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.team-invite-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.team-invite-success {
+  font-size: 13px;
+  color: #065f46;
+  background: #d1fae5;
+  border: 1px solid #6ee7b7;
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+.team-invite-error {
+  font-size: 13px;
+  color: #991b1b;
+  background: #fee2e2;
+  border: 1px solid #fca5a5;
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+.team-viewer-notice {
+  padding: 16px 18px;
+  font-size: 13px;
+  color: var(--text-3);
+}
