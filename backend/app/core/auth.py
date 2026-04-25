@@ -4,8 +4,9 @@ Auth0 JWT verification for FastAPI.
 How it works:
   1. Auth0 issues a signed JWT (RS256) to the React frontend after login.
   2. The frontend includes it as:  Authorization: Bearer <token>
-  3. This module fetches Auth0's public JWKS, verifies the token signature,
-     and returns the decoded claims as the "current user".
+  3. This module uses PyJWT's PyJWKClient to fetch Auth0's public JWKS,
+     verify the token signature, and return the decoded claims as the
+     "current user". JWKS caching is handled automatically by PyJWKClient.
 
 Dev mode (AUTH0_DOMAIN not set):
   Every request is treated as an authenticated dev user — no token required.
@@ -15,31 +16,28 @@ Dev mode (AUTH0_DOMAIN not set):
 import logging
 from typing import Any, Optional
 
-import httpx
+import jwt as pyjwt
+from jwt import PyJWTError as JWTError
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------
-# JWKS cache — fetched once per process start, refreshed on key miss
+# PyJWT's PyJWKClient handles JWKS fetching and caching automatically.
+# Cache is per-process; lifespan=3600 refreshes keys hourly.
 # ------------------------------------------------------------------
-_jwks_cache: Optional[dict] = None
+_jwks_client: pyjwt.PyJWKClient | None = None
 
 
-async def _get_jwks() -> dict:
-    global _jwks_cache
-    if _jwks_cache is not None:
-        return _jwks_cache
-    url = f"https://{settings.auth0_domain}/.well-known/jwks.json"
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.get(url)
-        resp.raise_for_status()
-        _jwks_cache = resp.json()
-        return _jwks_cache
+def _get_jwks_client() -> pyjwt.PyJWKClient:
+    global _jwks_client
+    if _jwks_client is None:
+        url = f"https://{settings.auth0_domain}/.well-known/jwks.json"
+        _jwks_client = pyjwt.PyJWKClient(url, cache_jwk_set=True, lifespan=3600)
+    return _jwks_client
 
 
 # ------------------------------------------------------------------
@@ -82,74 +80,23 @@ async def get_current_user(
 
     token = credentials.credentials
 
-    # ── Decode header to get kid ───────────────────────────────
+    # ── Fetch signing key and verify token ─────────────────────
     try:
-        unverified_header = jwt.get_unverified_header(token)
-    except JWTError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token header",
-        )
-
-    kid = unverified_header.get("kid")
-
-    # ── Fetch JWKS and find matching key ───────────────────────
-    try:
-        jwks = await _get_jwks()
-    except Exception as exc:
-        logger.error("Failed to fetch JWKS from Auth0: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Unable to fetch identity provider keys",
-        )
-
-    rsa_key: dict = {}
-    for key in jwks.get("keys", []):
-        if key.get("kid") == kid:
-            rsa_key = {
-                "kty": key["kty"],
-                "kid": key["kid"],
-                "use": key["use"],
-                "n": key["n"],
-                "e": key["e"],
-            }
-            break
-
-    if not rsa_key:
-        # Key not in cache — flush and retry once
-        global _jwks_cache
-        _jwks_cache = None
-        try:
-            jwks = await _get_jwks()
-            for key in jwks.get("keys", []):
-                if key.get("kid") == kid:
-                    rsa_key = {
-                        "kty": key["kty"],
-                        "kid": key["kid"],
-                        "use": key["use"],
-                        "n": key["n"],
-                        "e": key["e"],
-                    }
-                    break
-        except Exception:
-            pass
-
-    if not rsa_key:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Unable to find appropriate key",
-        )
-
-    # ── Verify and decode ──────────────────────────────────────
-    try:
-        payload = jwt.decode(
+        client = _get_jwks_client()
+        signing_key = client.get_signing_key_from_jwt(token)
+        payload = pyjwt.decode(
             token,
-            rsa_key,
+            signing_key.key,
             algorithms=["RS256"],
             audience=settings.auth0_audience,
             issuer=f"https://{settings.auth0_domain}/",
         )
-    except JWTError as exc:
+    except pyjwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired",
+        )
+    except pyjwt.InvalidTokenError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Token validation failed: {exc}",
