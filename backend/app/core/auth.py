@@ -69,7 +69,7 @@ async def get_current_user(
             "sub": "dev|local",
             "email": "dev@localhost",
             "name": "Dev User",
-            "roles": ["admin"],
+            "roles": ["admin"],  # dev bypass always admin
         }
 
     # ── Require token ──────────────────────────────────────────
@@ -155,4 +155,49 @@ async def get_current_user(
             detail=f"Token validation failed: {exc}",
         )
 
+    # Extract roles from Auth0 custom claim
+    # Auth0 Action sets: api.accessToken.setCustomClaim('https://docai.io/roles', [...])
+    roles = payload.get("https://docai.io/roles", [])
+    if isinstance(roles, str):
+        roles = [roles]
+    payload["roles"] = roles  # normalize to list, always present
+
     return payload
+
+
+def require_role(*required_roles: str):
+    """
+    FastAPI dependency factory for role-based access control.
+
+    Usage:
+        @router.post("/apply")
+        async def apply_fix(user = Depends(require_role("admin"))):
+
+    Multiple roles = any of them is sufficient:
+        Depends(require_role("admin", "editor"))
+    """
+    async def _check_role(
+        user: dict = Depends(get_current_user)
+    ) -> dict:
+        user_roles = user.get("roles", [])
+        if not any(r in user_roles for r in required_roles):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": "insufficient_permissions",
+                    "message": (
+                        f"This action requires one of these roles: "
+                        f"{', '.join(required_roles)}. "
+                        f"Your role: {', '.join(user_roles) or 'none'}. "
+                        f"Contact your workspace admin to request access."
+                    ),
+                    "required_roles": list(required_roles),
+                    "user_roles": user_roles,
+                }
+            )
+        return user
+    return _check_role
+
+
+# Convenience dependency — import this in routers
+require_admin = require_role("admin")

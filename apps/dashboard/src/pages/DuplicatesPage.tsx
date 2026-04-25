@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom"
 import "./DuplicatesPage.css"
 import { apiClient } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
+import { useAdminAction } from '@/components/AdminOnly'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -269,10 +270,14 @@ function DuplicateMirror({
 
 function ProposeOptions({
   isProposing,
+  adminDisabled = false,
+  adminTitle,
   onArchive,
   onRewrite,
 }: {
   isProposing: boolean
+  adminDisabled?: boolean
+  adminTitle?: string
   onArchive: () => void
   onRewrite: () => void
 }) {
@@ -282,7 +287,8 @@ function ProposeOptions({
       <button
         className={`btn-propose${isProposing ? " loading" : ""}`}
         onClick={onArchive}
-        disabled={isProposing}>
+        disabled={isProposing || adminDisabled}
+        title={adminTitle}>
         {isProposing
           ? <><span className="spinner-sm" /> Working…</>
           : "Archive one page"}
@@ -290,7 +296,8 @@ function ProposeOptions({
       <button
         className={`btn-propose btn-propose-primary${isProposing ? " loading" : ""}`}
         onClick={onRewrite}
-        disabled={isProposing}>
+        disabled={isProposing || adminDisabled}
+        title={adminTitle}>
         {isProposing
           ? <><span className="spinner-sm" /> Working…</>
           : "Rewrite & merge →"}
@@ -382,6 +389,7 @@ function DecisionPanel({
 export default function DuplicatesPage() {
   const navigate = useNavigate()
   const { isTokenReady } = useAuth()
+  const adminAction = useAdminAction()
 
   // Status
   const [status, setStatus] = useState<EmbedStatus | null>(null)
@@ -822,6 +830,8 @@ export default function DuplicatesPage() {
                   ) : (
                     <ProposeOptions
                       isProposing={isProposing}
+                      adminDisabled={adminAction.disabled}
+                      adminTitle={adminAction.title}
                       onArchive={() => proposeMerge(pair, "archive")}
                       onRewrite={() => setDecisionPanelPair(key)}
                     />

@@ -6,6 +6,7 @@ import { useTour } from "../contexts/TourContext"
 import "./OverviewPage.css"
 import { apiClient } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
+import { useAdminAction } from '@/components/AdminOnly'
 
 type IssueCategory = "stale" | "empty" | "no_owner" | "generic_title" | "needs_review"
 
@@ -118,6 +119,7 @@ export default function OverviewPage() {
   const navigate = useNavigate()
   const { startTour, showWelcome, dismissWelcome } = useTour()
   const { isTokenReady } = useAuth()
+  const adminAction = useAdminAction()
   const [stats, setStats] = useState<Stats | null>(null)
   const [sweep, setSweep] = useState<SweepResult | null>(null)
   const [loading, setLoading] = useState(true)
@@ -247,7 +249,8 @@ export default function OverviewPage() {
         <button
           className={`btn-sweep${sweepLoading ? " running" : ""}`}
           onClick={runSweep}
-          disabled={sweepLoading}>
+          disabled={sweepLoading || adminAction.disabled}
+          title={adminAction.title}>
           <span className={`btn-sweep-icon${sweepLoading ? " spin" : ""}`}>↻</span>
           {sweepLoading ? "Scanning…" : "Run Sweep"}
         </button>
@@ -346,7 +349,7 @@ export default function OverviewPage() {
                 </div>
               </div>
               {!sweep && !sweepLoading && (
-                <button className="btn-sweep-sm" onClick={runSweep}>Run Sweep</button>
+                <button className="btn-sweep-sm" onClick={runSweep} {...adminAction}>Run Sweep</button>
               )}
               {sweepLoading && <span className="ov-card-badge-scanning">Scanning…</span>}
             </div>
@@ -579,13 +582,15 @@ export default function OverviewPage() {
             </div>
             <div className="ov-quick-actions">
               {[
-                { icon: "↻", label: "Sync Confluence",  sub: "Fetch latest pages",                    action: () => navigate("/pages")      },
-                { icon: "◎", label: "Run Sweep",         sub: "Index and healthcheck workspace",        action: runSweep                       },
-                { icon: "⊕", label: "Duplicate Scan",   sub: "Find similar pages",                    action: () => navigate("/duplicates")  },
-                { icon: "✎", label: "Batch Rename",      sub: "Fix page titles",                       action: () => navigate("/batch-rename")},
-                { icon: "✓", label: "Review Proposals", sub: `${stats?.proposals_pending ?? 0} pending`, action: () => navigate("/proposals") },
+                { icon: "↻", label: "Sync Confluence",  sub: "Fetch latest pages",                    action: () => navigate("/pages"),       adminOnly: false },
+                { icon: "◎", label: "Run Sweep",         sub: "Index and healthcheck workspace",        action: runSweep,                       adminOnly: true  },
+                { icon: "⊕", label: "Duplicate Scan",   sub: "Find similar pages",                    action: () => navigate("/duplicates"),  adminOnly: false },
+                { icon: "✎", label: "Batch Rename",      sub: "Fix page titles",                       action: () => navigate("/batch-rename"), adminOnly: true  },
+                { icon: "✓", label: "Review Proposals", sub: `${stats?.proposals_pending ?? 0} pending`, action: () => navigate("/proposals"), adminOnly: false },
               ].map((qa, i) => (
-                <button key={i} className="ov-qa-btn" onClick={qa.action}>
+                <button key={i} className="ov-qa-btn" onClick={qa.action}
+                  disabled={qa.adminOnly && adminAction.disabled}
+                  title={qa.adminOnly ? adminAction.title : undefined}>
                   <span className="ov-qa-icon">{qa.icon}</span>
                   <div>
                     <div className="ov-qa-label">{qa.label}</div>

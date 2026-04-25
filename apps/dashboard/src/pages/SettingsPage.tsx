@@ -4,6 +4,7 @@ import * as Sentry from "@sentry/react"
 import "./SettingsPage.css"
 import { apiClient, API_BASE } from '@/lib/api'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
+import { AdminOnly } from '@/components/AdminOnly'
 
 type Tab = "overview" | "profile" | "integrations" | "preferences" | "analysis" | "privacy" | "about"
 
@@ -178,9 +179,11 @@ function ProfileTab() {
         </div>
       </div>
 
-      <button className="settings-save-btn" onClick={save}>
-        {saved ? "✓ Saved" : "Save Profile"}
-      </button>
+      <AdminOnly fallback={<p className="settings-viewer-notice">Contact your admin to change profile settings.</p>}>
+        <button className="settings-save-btn" onClick={save}>
+          {saved ? "✓ Saved" : "Save Profile"}
+        </button>
+      </AdminOnly>
     </div>
   )
 }
@@ -314,6 +317,7 @@ function IntegrationsTab() {
 
         {confError && <div className="settings-error-msg">{confError}</div>}
 
+        <AdminOnly fallback={<p className="settings-viewer-notice">Contact your admin to change integration settings.</p>}>
         <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center" }}>
           <button
             className="settings-save-btn"
@@ -330,6 +334,7 @@ function IntegrationsTab() {
           </button>
           <TestBadge />
         </div>
+        </AdminOnly>
       </div>
     </div>
   )
@@ -415,9 +420,11 @@ function PreferencesTab() {
         ))}
       </div>
 
-      <button className="settings-save-btn" onClick={save}>
-        {saved ? "✓ Saved" : "Save Preferences"}
-      </button>
+      <AdminOnly fallback={<p className="settings-viewer-notice">Contact your admin to change preferences.</p>}>
+        <button className="settings-save-btn" onClick={save}>
+          {saved ? "✓ Saved" : "Save Preferences"}
+        </button>
+      </AdminOnly>
     </div>
   )
 }

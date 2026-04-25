@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.core.config import settings
-from app.core.auth import get_current_user
+from app.core.auth import require_admin
 from app.core.usage import check_limit, track_usage
 from app.db.database import get_db
 from app.core.workspace import get_current_workspace
@@ -498,7 +498,7 @@ async def analyze_page(
     force_refresh: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_admin),
 ):
     wid = workspace.id
 

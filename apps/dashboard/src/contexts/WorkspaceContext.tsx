@@ -12,6 +12,8 @@ interface Workspace {
   onboarding_completed: boolean
   created_at: string
   updated_at: string
+  user_role: 'admin' | 'viewer'
+  user_roles: string[]
 }
 
 interface WorkspaceContextValue {
@@ -55,4 +57,13 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
 
 export function useWorkspace() {
   return useContext(WorkspaceContext)
+}
+
+export function useRole() {
+  const { workspace } = useContext(WorkspaceContext)
+  return {
+    role: workspace?.user_role ?? 'viewer',
+    isAdmin: workspace?.user_role === 'admin',
+    isViewer: workspace?.user_role !== 'admin',
+  }
 }

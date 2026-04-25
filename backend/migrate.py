@@ -111,6 +111,13 @@ MIGRATIONS = [
         ]
     ),
     (
+        '004_workspace_member_roles',
+        'Add default_member_role to workspaces for future member management',
+        [
+            "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS default_member_role VARCHAR NOT NULL DEFAULT 'viewer'",
+        ]
+    ),
+    (
         '003_clear_encrypted_tokens_after_key_hardening',
         'Clear Confluence tokens after encryption key hardening (users must re-enter)',
         [

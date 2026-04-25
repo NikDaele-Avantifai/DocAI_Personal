@@ -2,6 +2,7 @@ import { useState, useEffect } from "react"
 import "./ApprovalsPage.css"
 import { apiClient } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
+import { useAdminAction } from '@/components/AdminOnly'
 
 type DiffLine = {
   type: "add" | "remove" | "context" | "hunk"
@@ -103,6 +104,7 @@ type NormalisedProposal = ReturnType<typeof normalise>
 
 export default function ApprovalsPage() {
   const { isTokenReady } = useAuth()
+  const adminAction = useAdminAction()
   const [proposals, setProposals] = useState<NormalisedProposal[]>([])
   const [selected, setSelected] = useState<NormalisedProposal | null>(null)
   const [filter, setFilter] = useState<"pending" | "all" | "approved" | "rejected">("pending")
@@ -497,7 +499,8 @@ export default function ApprovalsPage() {
                       ) : (
                         <button
                           className="rename-apply-btn"
-                          disabled={isLoading}
+                          disabled={isLoading || adminAction.disabled}
+                          title={adminAction.title}
                           onClick={() => applyRenameItem(selected.id, r.pageId, r.suggestedTitle!)}>
                           {isLoading ? "…" : "Apply"}
                         </button>
@@ -516,13 +519,14 @@ export default function ApprovalsPage() {
         <div className="rename-footer">
           <button
             className="btn-apply"
-            disabled={pendingCount === 0 || renameLoading.size > 0}
+            disabled={pendingCount === 0 || renameLoading.size > 0 || adminAction.disabled}
+            title={adminAction.title}
             onClick={() => applyAllRenames(selected.id, applicableRenames)}>
             {renameLoading.size > 0
               ? <span className="modal-loading"><span className="spinner-dark" /> Applying…</span>
               : `Apply all (${pendingCount})`}
           </button>
-          <button className="btn-reject" onClick={() => review(selected.id, "rejected")}>
+          <button className="btn-reject" onClick={() => review(selected.id, "rejected")} {...adminAction}>
             Dismiss all
           </button>
         </div>
@@ -653,12 +657,12 @@ export default function ApprovalsPage() {
         {selected.status === "pending" && (
           <div className="diff-actions-col">
             <div className="diff-actions">
-              <button className="btn-apply" onClick={applyToConfluence} disabled={applyLoading}>
+              <button className="btn-apply" onClick={applyToConfluence} disabled={applyLoading || adminAction.disabled} title={adminAction.title}>
                 {applyLoading
                   ? <span className="modal-loading"><span className="spinner-dark" /> Applying…</span>
                   : "Apply fix"}
               </button>
-              <button className="btn-reject" onClick={() => review(selected.id, "rejected")}>
+              <button className="btn-reject" onClick={() => review(selected.id, "rejected")} {...adminAction}>
                 Dismiss
               </button>
             </div>
@@ -889,10 +893,10 @@ export default function ApprovalsPage() {
                 {/* Actions */}
                 {selected.status === "pending" && (
                   <div className="diff-actions">
-                    <button data-tour="approve-button" className="btn-approve" onClick={() => review(selected.id, "approved")}>
+                    <button data-tour="approve-button" className="btn-approve" onClick={() => review(selected.id, "approved")} {...adminAction}>
                       ✓ Approve
                     </button>
-                    <button className="btn-reject" onClick={() => review(selected.id, "rejected")}>
+                    <button className="btn-reject" onClick={() => review(selected.id, "rejected")} {...adminAction}>
                       ✕ Reject
                     </button>
                     <button className="btn-ghost-sm">Open in Confluence ↗</button>
@@ -904,7 +908,7 @@ export default function ApprovalsPage() {
                     <div className="diff-actions">
                       <div className="decision-badge decision-approved">✓ Approved</div>
                       {selected.new_content && (
-                        <button className="btn-apply" onClick={applyToConfluence} disabled={applyLoading}>
+                        <button className="btn-apply" onClick={applyToConfluence} disabled={applyLoading || adminAction.disabled} title={adminAction.title}>
                           {applyLoading ? <span className="modal-loading"><span className="spinner-dark" /> Applying…</span> : "Apply to Confluence ↗"}
                         </button>
                       )}

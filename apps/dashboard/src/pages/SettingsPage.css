@@ -327,6 +327,12 @@
 }
 .settings-save-btn:hover { background: var(--accent-hover); }
 
+.settings-viewer-notice {
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+
 /* About grid */
 .settings-about-grid {
   background: var(--bg-white);

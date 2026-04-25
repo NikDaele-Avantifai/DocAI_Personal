@@ -4,6 +4,7 @@ from sqlalchemy import select
 from datetime import datetime, timezone
 
 from app.db.database import get_db
+from app.core.auth import require_admin
 from app.core.workspace import get_current_workspace
 from app.models.workspace import Workspace
 from app.models.analysis_settings import WorkspaceSettings, AnalysisSettings
@@ -38,6 +39,7 @@ async def update_analysis_settings(
     body: AnalysisSettings,
     db: AsyncSession = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
+    _user: dict = Depends(require_admin),
 ):
     row = await _get_or_create(db, workspace.id)
     row.settings = body.model_dump()

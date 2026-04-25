@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
+from app.core.auth import get_current_user, require_admin
 from app.core.workspace import get_current_workspace
 from app.models.workspace import Workspace
 from app.core.encryption import encrypt_token
@@ -42,7 +43,11 @@ class ConfluenceUpdateRequest(BaseModel):
 
 
 @router.get("/")
-async def get_workspace(workspace: Workspace = Depends(get_current_workspace)):
+async def get_workspace(
+    workspace: Workspace = Depends(get_current_workspace),
+    user: dict = Depends(get_current_user),
+):
+    roles = user.get("roles", [])
     return {
         "id": workspace.id,
         "owner_email": workspace.owner_email,
@@ -51,6 +56,8 @@ async def get_workspace(workspace: Workspace = Depends(get_current_workspace)):
         "confluence_base_url": workspace.confluence_base_url,
         "confluence_email": workspace.confluence_email,
         # Never return confluence_api_token_enc
+        "user_role": roles[0] if roles else "viewer",
+        "user_roles": roles,
     }
 
 
@@ -59,6 +66,7 @@ async def update_confluence_settings(
     body: ConfluenceUpdateRequest,
     db: AsyncSession = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
+    _user: dict = Depends(require_admin),
 ):
     """
     Updates Confluence connection settings.
@@ -79,6 +87,7 @@ async def update_confluence_settings(
 async def complete_onboarding(
     db: AsyncSession = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
+    _user: dict = Depends(require_admin),
 ):
     workspace.onboarding_completed = True
     db.add(workspace)

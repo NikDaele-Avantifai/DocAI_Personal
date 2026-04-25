@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
+from app.core.auth import require_admin
 from app.core.workspace import get_current_workspace
 from app.models.workspace import Workspace
 from app.models.page import Page
@@ -75,6 +76,7 @@ def _classify_page(page: Page, has_open_issues: bool, ai_healthy: bool = False) 
 async def run_sweep(
     db: AsyncSession = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
+    _user: dict = Depends(require_admin),
 ):
     """
     Quick heuristic sweep across all pages — no AI calls, results in seconds.
