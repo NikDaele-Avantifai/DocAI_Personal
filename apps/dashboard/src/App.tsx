@@ -10,6 +10,7 @@ import { TourProvider } from "./contexts/TourContext"
 import { AuthProvider } from "./contexts/AuthContext"
 import { WorkspaceProvider, useWorkspace } from "./contexts/WorkspaceContext"
 
+import AdminDashboard from "./pages/AdminDashboard"
 import LoginPage from "./pages/LoginPage"
 import OverviewPage from "./pages/OverviewPage"
 import ApprovalsPage from "./pages/ApprovalsPage"
@@ -59,6 +60,9 @@ function App({ bypassAuth = false }: AppProps) {
           <OnboardingGuard>
             <>
               <Routes>
+                {/* Internal admin — no Auth0, no WorkspaceProvider */}
+                <Route path="/admin" element={<AdminDashboard />} />
+
                 {/* Public */}
                 <Route path="/login" element={<LoginPage />} />
 

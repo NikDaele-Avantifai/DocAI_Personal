@@ -32,9 +32,10 @@ function daysUntil(iso: string): number {
 }
 
 function RoleBadge({ role }: { role: string }) {
+  const label = role === "admin" ? "Admin" : role === "editor" ? "Editor" : "Viewer"
   return (
     <span className={`team-role-badge team-role-badge-${role}`}>
-      {role === "admin" ? "Admin" : "Viewer"}
+      {label}
     </span>
   )
 }
@@ -46,7 +47,7 @@ export default function TeamPage() {
 
   // Invite form state
   const [inviteEmail, setInviteEmail] = useState("")
-  const [inviteRole, setInviteRole] = useState<"admin" | "viewer">("viewer")
+  const [inviteRole, setInviteRole] = useState<"admin" | "editor" | "viewer">("viewer")
   const [inviting, setInviting] = useState(false)
   const [inviteSuccess, setInviteSuccess] = useState<string | null>(null)
   const [inviteError, setInviteError] = useState<string | null>(null)
@@ -96,7 +97,7 @@ export default function TeamPage() {
     }
   }
 
-  async function updateRole(memberId: number, role: "admin" | "viewer") {
+  async function updateRole(memberId: number, role: "admin" | "editor" | "viewer") {
     setUpdatingRole(memberId)
     try {
       await apiClient.patch(`/api/workspace/members/${memberId}/role`, { role })
@@ -179,9 +180,10 @@ export default function TeamPage() {
                         className="team-role-select"
                         value={m.role}
                         disabled={updatingRole === m.id}
-                        onChange={e => updateRole(m.id, e.target.value as "admin" | "viewer")}>
-                        <option value="viewer">Viewer</option>
-                        <option value="admin">Admin</option>
+                        onChange={e => updateRole(m.id, e.target.value as "admin" | "editor" | "viewer")}>
+                        <option value="viewer">Viewer — can view all data, no actions</option>
+                        <option value="editor">Editor — can analyze, approve, run sweeps</option>
+                        <option value="admin">Admin — full access including settings</option>
                       </select>
                       <button
                         className="team-remove-btn"
@@ -270,9 +272,10 @@ export default function TeamPage() {
                   <select
                     className="team-invite-select"
                     value={inviteRole}
-                    onChange={e => setInviteRole(e.target.value as "admin" | "viewer")}>
-                    <option value="viewer">Viewer</option>
-                    <option value="admin">Admin</option>
+                    onChange={e => setInviteRole(e.target.value as "admin" | "editor" | "viewer")}>
+                    <option value="viewer">Viewer — can view all data, no actions</option>
+                    <option value="editor">Editor — can analyze, approve, run sweeps</option>
+                    <option value="admin">Admin — full access including settings</option>
                   </select>
                   <button
                     className="team-invite-btn"

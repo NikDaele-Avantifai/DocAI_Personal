@@ -146,5 +146,26 @@ def require_role(*required_roles: str):
     return _check_role
 
 
-# Convenience dependency — import this in routers
+# Convenience dependencies — import these in routers
 require_admin = require_role("admin")
+
+
+async def require_editor_or_above(
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """Allows admin and editor roles. Blocks viewer."""
+    user_roles = user.get("roles", [])
+    if not any(r in user_roles for r in ["admin", "editor"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "insufficient_permissions",
+                "message": "This action requires Editor or Admin access.",
+                "required_roles": ["admin", "editor"],
+                "user_roles": user_roles,
+            },
+        )
+    return user
+
+
+require_editor = require_editor_or_above

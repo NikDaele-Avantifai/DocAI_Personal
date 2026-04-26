@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy import select
 
 from app.core.config import settings
-from app.core.auth import require_admin
+from app.core.auth import require_admin, require_editor
 from app.core.workspace import get_current_workspace
 from app.core.encryption import decrypt_token
 from app.db.database import get_db
@@ -117,7 +117,7 @@ async def review_proposal(
     body: ReviewProposalRequest,
     db: AsyncSession = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
-    _user: dict = Depends(require_admin),
+    _user: dict = Depends(require_editor),
 ):
     if proposal_id not in _proposals:
         raise HTTPException(status_code=404, detail="Proposal not found")

@@ -84,6 +84,11 @@
   color: var(--accent, #1e40af);
 }
 
+.team-role-badge-editor {
+  background: var(--green-light, #dcfce7);
+  color: var(--green, #166534);
+}
+
 .team-role-badge-viewer {
   background: var(--surface-2);
   color: var(--text-2);

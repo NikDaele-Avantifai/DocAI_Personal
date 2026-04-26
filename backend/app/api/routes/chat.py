@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.auth import get_current_user
+from app.core.auth import require_editor
 from app.core.usage import check_limit, track_usage
 from app.core.workspace import get_current_workspace
 from app.db.database import get_db
@@ -122,7 +122,7 @@ async def chat(
     body: ChatRequest,
     db: AsyncSession = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """Stream a chat response using Claude via SSE."""
     if not settings.anthropic_api_key:

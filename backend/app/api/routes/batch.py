@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.auth import require_admin
+from app.core.auth import require_editor
 from app.core.usage import check_limit, track_usage
 from app.core.workspace import get_current_workspace
 from app.db.database import get_db
@@ -189,7 +189,7 @@ async def batch_rename(
     body: BatchRenameRequest,
     db: AsyncSession = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
-    user: dict = Depends(require_admin),
+    user: dict = Depends(require_editor),
 ):
     wid = workspace.id
     q = select(Page).where(Page.workspace_id == wid)

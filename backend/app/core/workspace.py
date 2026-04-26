@@ -6,7 +6,7 @@ or links them to an existing workspace if a pending invite exists for their emai
 import logging
 from datetime import datetime, timezone, timedelta
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 async def get_current_workspace(
+    request: Request,
     user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Workspace:
@@ -57,6 +58,8 @@ async def get_current_workspace(
         )
         ws = ws_result.scalar_one_or_none()
         if ws:
+            # Inject the DB role so require_admin/require_editor work correctly
+            user["roles"] = [member.role]
             return ws
 
     # 3. Check for a pending invite by email — accept it on first login
@@ -96,6 +99,8 @@ async def get_current_workspace(
                     "Invite accepted: %s joined workspace %s as %s",
                     email, invite.workspace_id, invite.role,
                 )
+                # Inject the DB role so require_admin/require_editor work correctly
+                user["roles"] = [invite.role]
                 return ws
 
     # 4. No workspace found — create a new owned workspace

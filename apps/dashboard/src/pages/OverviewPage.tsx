@@ -6,7 +6,7 @@ import { useTour } from "../contexts/TourContext"
 import "./OverviewPage.css"
 import { apiClient } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
-import { useAdminAction } from '@/components/AdminOnly'
+import { useEditorAction } from '@/components/AdminOnly'
 
 type IssueCategory = "stale" | "empty" | "no_owner" | "generic_title" | "needs_review"
 
@@ -119,7 +119,7 @@ export default function OverviewPage() {
   const navigate = useNavigate()
   const { startTour, showWelcome, dismissWelcome } = useTour()
   const { isTokenReady } = useAuth()
-  const adminAction = useAdminAction()
+  const adminAction = useEditorAction()
   const [stats, setStats] = useState<Stats | null>(null)
   const [sweep, setSweep] = useState<SweepResult | null>(null)
   const [loading, setLoading] = useState(true)

@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.auth import require_admin
+from app.core.auth import require_editor
 from app.core.usage import check_limit, track_usage
 from app.core.workspace import get_current_workspace
 from app.core.encryption import decrypt_token
@@ -217,7 +217,7 @@ async def propose_duplicate(
     body: ProposeDuplicateRequest,
     db: AsyncSession = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
-    user: dict = Depends(require_admin),
+    user: dict = Depends(require_editor),
 ):
     """Creates a structured duplication proposal with Claude-identified duplicate content."""
     existing = next(
@@ -253,7 +253,7 @@ async def propose_merge(
     body: ProposeMergeRequest,
     db: AsyncSession = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
-    user: dict = Depends(require_admin),
+    user: dict = Depends(require_editor),
 ):
     """Asks Claude to analyse two pages and creates a merge proposal in the Approvals queue."""
     existing = next(

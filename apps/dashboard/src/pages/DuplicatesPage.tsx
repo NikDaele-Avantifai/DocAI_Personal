@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom"
 import "./DuplicatesPage.css"
 import { apiClient } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
-import { useAdminAction } from '@/components/AdminOnly'
+import { useEditorAction } from '@/components/AdminOnly'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -389,7 +389,7 @@ function DecisionPanel({
 export default function DuplicatesPage() {
   const navigate = useNavigate()
   const { isTokenReady } = useAuth()
-  const adminAction = useAdminAction()
+  const adminAction = useEditorAction()
 
   // Status
   const [status, setStatus] = useState<EmbedStatus | null>(null)

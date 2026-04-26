@@ -2,7 +2,7 @@ import { useState, useEffect } from "react"
 import "./ApprovalsPage.css"
 import { apiClient } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
-import { useAdminAction } from '@/components/AdminOnly'
+import { useAdminAction, useEditorAction } from '@/components/AdminOnly'
 
 type DiffLine = {
   type: "add" | "remove" | "context" | "hunk"
@@ -105,6 +105,7 @@ type NormalisedProposal = ReturnType<typeof normalise>
 export default function ApprovalsPage() {
   const { isTokenReady } = useAuth()
   const adminAction = useAdminAction()
+  const editorAction = useEditorAction()
   const [proposals, setProposals] = useState<NormalisedProposal[]>([])
   const [selected, setSelected] = useState<NormalisedProposal | null>(null)
   const [filter, setFilter] = useState<"pending" | "all" | "approved" | "rejected">("pending")
@@ -526,7 +527,7 @@ export default function ApprovalsPage() {
               ? <span className="modal-loading"><span className="spinner-dark" /> Applying…</span>
               : `Apply all (${pendingCount})`}
           </button>
-          <button className="btn-reject" onClick={() => review(selected.id, "rejected")} {...adminAction}>
+          <button className="btn-reject" onClick={() => review(selected.id, "rejected")} {...editorAction}>
             Dismiss all
           </button>
         </div>
@@ -662,7 +663,7 @@ export default function ApprovalsPage() {
                   ? <span className="modal-loading"><span className="spinner-dark" /> Applying…</span>
                   : "Apply fix"}
               </button>
-              <button className="btn-reject" onClick={() => review(selected.id, "rejected")} {...adminAction}>
+              <button className="btn-reject" onClick={() => review(selected.id, "rejected")} {...editorAction}>
                 Dismiss
               </button>
             </div>
@@ -893,10 +894,10 @@ export default function ApprovalsPage() {
                 {/* Actions */}
                 {selected.status === "pending" && (
                   <div className="diff-actions">
-                    <button data-tour="approve-button" className="btn-approve" onClick={() => review(selected.id, "approved")} {...adminAction}>
+                    <button data-tour="approve-button" className="btn-approve" onClick={() => review(selected.id, "approved")} {...editorAction}>
                       ✓ Approve
                     </button>
-                    <button className="btn-reject" onClick={() => review(selected.id, "rejected")} {...adminAction}>
+                    <button className="btn-reject" onClick={() => review(selected.id, "rejected")} {...editorAction}>
                       ✕ Reject
                     </button>
                     <button className="btn-ghost-sm">Open in Confluence ↗</button>

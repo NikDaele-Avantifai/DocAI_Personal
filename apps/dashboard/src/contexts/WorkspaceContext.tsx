@@ -12,7 +12,7 @@ interface Workspace {
   onboarding_completed: boolean
   created_at: string
   updated_at: string
-  user_role: 'admin' | 'viewer'
+  user_role: 'admin' | 'editor' | 'viewer'
   user_roles: string[]
   plan: string
   effective_plan: string
@@ -65,9 +65,13 @@ export function useWorkspace() {
 
 export function useRole() {
   const { workspace } = useContext(WorkspaceContext)
+  const role = workspace?.user_role ?? 'viewer'
   return {
-    role: workspace?.user_role ?? 'viewer',
-    isAdmin: workspace?.user_role === 'admin',
-    isViewer: workspace?.user_role !== 'admin',
+    role,
+    isAdmin: role === 'admin',
+    isEditor: role === 'editor' || role === 'admin',
+    isViewer: role === 'viewer',
+    canWrite: role === 'admin' || role === 'editor',
+    canManage: role === 'admin',
   }
 }
