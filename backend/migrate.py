@@ -39,7 +39,7 @@ MIGRATIONS = [
         [
             'CREATE TABLE IF NOT EXISTS workspaces (id VARCHAR PRIMARY KEY, owner_sub VARCHAR NOT NULL, owner_email VARCHAR, confluence_base_url VARCHAR, confluence_email VARCHAR, confluence_api_token_enc TEXT, onboarding_completed BOOLEAN NOT NULL DEFAULT FALSE, confluence_connected BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())',
             'CREATE UNIQUE INDEX IF NOT EXISTS ix_workspaces_owner_sub ON workspaces(owner_sub)',
-            "INSERT INTO workspaces (id, owner_sub, owner_email, onboarding_completed, confluence_connected) VALUES ('00000000-0000-0000-0000-000000000001', 'legacy|default', 'legacy@avantifai.com', true, true) ON CONFLICT DO NOTHING",
+            "INSERT INTO workspaces (id, owner_sub, owner_email, onboarding_completed, confluence_connected, plan) VALUES ('00000000-0000-0000-0000-000000000001', 'legacy|default', 'legacy@avantifai.com', true, true, 'trial') ON CONFLICT DO NOTHING",
             'ALTER TABLE spaces ADD COLUMN IF NOT EXISTS workspace_id VARCHAR',
             "UPDATE spaces SET workspace_id = '00000000-0000-0000-0000-000000000001' WHERE workspace_id IS NULL",
             'CREATE INDEX IF NOT EXISTS ix_spaces_workspace_id ON spaces(workspace_id)',

@@ -15,6 +15,12 @@ async def main() -> None:
     import app.models.audit            # noqa: F401 — registers AuditEntry
     import app.models.snapshot         # noqa: F401 — registers Snapshot
     import app.models.dismissed_issue  # noqa: F401 — registers DismissedIssue
+    import app.models.page_analysis    # noqa: F401 — registers PageAnalysis
+    import app.models.analysis_settings  # noqa: F401 — registers WorkspaceSettings
+    import app.models.sweep            # noqa: F401 — registers WorkspaceSweep
+    import app.models.workspace        # noqa: F401 — registers Workspace
+    import app.models.usage            # noqa: F401 — registers WorkspaceUsage + UsageEvent
+    import app.models.workspace_member  # noqa: F401 — registers WorkspaceMember + WorkspaceInvite
 
     print(f"Connecting to: {settings.database_url}")
 
@@ -22,7 +28,13 @@ async def main() -> None:
 
     try:
         async with engine.begin() as conn:
-            # Create any tables that don't exist yet
+            # Ensure pgvector extension exists before table creation
+            try:
+                await conn.execute(sqlalchemy.text("CREATE EXTENSION IF NOT EXISTS vector"))
+                print("  ✓ pgvector extension")
+            except Exception as e:
+                print(f"  ✗ pgvector extension (non-fatal): {e}")
+
             await conn.run_sync(Base.metadata.create_all)
 
         print("✓ Tables created/verified")
