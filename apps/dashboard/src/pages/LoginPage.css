@@ -128,3 +128,172 @@
 @keyframes login-spin {
   to { transform: rotate(360deg); }
 }
+
+/* ── Multi-method login ───────────────────────────────────────────────────── */
+
+.login-methods {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.login-btn-google {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 20px;
+  background: #ffffff;
+  color: #1A2E44;
+  border: 1px solid rgba(26, 46, 68, 0.2);
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: 'Manrope', sans-serif;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+
+.login-btn-google:hover {
+  background: #f8fafc;
+  border-color: rgba(26, 46, 68, 0.35);
+}
+
+.login-btn-microsoft {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 20px;
+  background: #ffffff;
+  color: #1A2E44;
+  border: 1px solid rgba(26, 46, 68, 0.2);
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: 'Manrope', sans-serif;
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+
+.login-btn-microsoft:hover { background: #f8fafc; }
+
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #7A96AE;
+  font-size: 12px;
+  margin: 4px 0;
+}
+
+.login-divider::before,
+.login-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(26, 46, 68, 0.12);
+}
+
+.login-btn-email {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 11px 20px;
+  background: transparent;
+  color: #3D5166;
+  border: 1px solid rgba(26, 46, 68, 0.15);
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: 'Manrope', sans-serif;
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+
+.login-btn-email:hover { background: rgba(135, 186, 208, 0.08); }
+
+.login-back {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  color: #7A96AE;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+  margin-bottom: 4px;
+  font-family: 'Manrope', sans-serif;
+}
+
+.login-back:hover { color: #1A2E44; }
+
+.login-email-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid rgba(26, 46, 68, 0.2);
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: 'Manrope', sans-serif;
+  color: #1A2E44;
+  background: #fff;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 150ms ease;
+}
+
+.login-email-input:focus {
+  border-color: #1A2E44;
+}
+
+.login-magic-note {
+  font-size: 12px;
+  color: #7A96AE;
+  text-align: center;
+  margin: 0;
+}
+
+.login-success-icon {
+  width: 48px;
+  height: 48px;
+  background: rgba(22, 163, 74, 0.1);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+  font-size: 22px;
+  color: #16a34a;
+}
+
+.login-success-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1A2E44;
+  margin: 0 0 6px;
+}
+
+.login-success-sub {
+  font-size: 13px;
+  color: #7A96AE;
+  margin: 0 0 4px;
+  line-height: 1.5;
+}
+
+.login-retry {
+  background: none;
+  border: none;
+  color: #1A2E44;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: underline;
+  font-family: 'Manrope', sans-serif;
+  margin-top: 4px;
+  padding: 0;
+}
