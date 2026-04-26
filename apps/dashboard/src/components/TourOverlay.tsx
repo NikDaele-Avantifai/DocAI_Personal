@@ -72,6 +72,7 @@ export default function TourOverlay() {
   const navigate = useNavigate()
   const location = useLocation()
   const [spotlight, setSpotlight] = useState<Rect | null>(null)
+  const [isCentered, setIsCentered] = useState(false)
   const [ready, setReady] = useState(false)
   const prevStepRef = useRef(-1)
 
@@ -84,14 +85,24 @@ export default function TourOverlay() {
       await new Promise(r => setTimeout(r, 350))
     }
 
-    const el = await waitForElement(selector)
-    if (!el) {
-      // Fallback: center the tooltip with no spotlight
-      setSpotlight({ x: window.innerWidth / 2 - 100, y: window.innerHeight / 2 - 50, width: 200, height: 100 })
+    // No target — render as centered modal with no spotlight
+    if (!selector) {
+      setIsCentered(true)
+      setSpotlight({ x: 0, y: 0, width: 0, height: 0 })
       setReady(true)
       return
     }
 
+    const el = await waitForElement(selector)
+    if (!el) {
+      // Target not found — fall back to centered modal
+      setIsCentered(true)
+      setSpotlight({ x: 0, y: 0, width: 0, height: 0 })
+      setReady(true)
+      return
+    }
+
+    setIsCentered(false)
     el.scrollIntoView({ behavior: 'smooth', block: 'center' })
     await new Promise(r => setTimeout(r, 200))
 
@@ -139,7 +150,8 @@ export default function TourOverlay() {
   const sw = spotlight.width + SPOTLIGHT_PAD * 2
   const sh = spotlight.height + SPOTLIGHT_PAD * 2
 
-  const tooltipStyle = getTooltipStyle(currentStepData.position, { x: sx, y: sy, width: sw, height: sh }, vpW, vpH)
+  const effectivePosition = isCentered ? 'center' : currentStepData.position
+  const tooltipStyle = getTooltipStyle(effectivePosition, { x: sx, y: sy, width: sw, height: sh }, vpW, vpH)
   const isLast = currentStep === totalSteps - 1
 
   const handleBackdropClick = (e: React.MouseEvent) => {
@@ -151,25 +163,39 @@ export default function TourOverlay() {
 
   return createPortal(
     <div className="tour-root" aria-modal="true" role="dialog">
-      {/* SVG spotlight overlay */}
-      <svg
-        className="tour-svg"
-        onClick={handleBackdropClick}
-        style={{ cursor: isDemoMode ? 'pointer' : 'default' }}>
-        <defs>
-          <mask id="tour-mask">
-            <rect x="0" y="0" width="100%" height="100%" fill="white" />
-            <rect x={sx} y={sy} width={sw} height={sh} rx="6" fill="black" />
-          </mask>
-        </defs>
-        <rect x="0" y="0" width="100%" height="100%" fill="rgba(9,30,66,0.54)" mask="url(#tour-mask)" />
-      </svg>
+      {isCentered ? (
+        /* Centered modal — full-screen dimmed backdrop, no spotlight cutout */
+        <div
+          className="tour-svg"
+          onClick={handleBackdropClick}
+          style={{
+            background: 'rgba(9,30,66,0.54)',
+            cursor: isDemoMode ? 'pointer' : 'default',
+          }}
+        />
+      ) : (
+        <>
+          {/* SVG spotlight overlay */}
+          <svg
+            className="tour-svg"
+            onClick={handleBackdropClick}
+            style={{ cursor: isDemoMode ? 'pointer' : 'default' }}>
+            <defs>
+              <mask id="tour-mask">
+                <rect x="0" y="0" width="100%" height="100%" fill="white" />
+                <rect x={sx} y={sy} width={sw} height={sh} rx="6" fill="black" />
+              </mask>
+            </defs>
+            <rect x="0" y="0" width="100%" height="100%" fill="rgba(9,30,66,0.54)" mask="url(#tour-mask)" />
+          </svg>
 
-      {/* Spotlight highlight ring */}
-      <div
-        className="tour-spotlight-ring"
-        style={{ left: sx, top: sy, width: sw, height: sh }}
-      />
+          {/* Spotlight highlight ring */}
+          <div
+            className="tour-spotlight-ring"
+            style={{ left: sx, top: sy, width: sw, height: sh }}
+          />
+        </>
+      )}
 
       {/* Tooltip card */}
       <div className="tour-card" style={tooltipStyle}>
