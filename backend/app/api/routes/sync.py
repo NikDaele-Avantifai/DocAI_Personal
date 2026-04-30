@@ -1,4 +1,7 @@
+import asyncio
 import logging
+import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import select as sa_select
@@ -10,12 +13,15 @@ from app.core.encryption import decrypt_token
 from app.db.database import get_db, AsyncSessionLocal
 from app.models.workspace import Workspace
 from app.models.page import Page
+from app.models.job import BackgroundJob
 from app.services.confluence_service import ConfluenceService
 from app.services.embedding_service import EmbeddingService
 from app.services.sync_service import SyncService
 
 log = logging.getLogger(__name__)
 _embed_svc = EmbeddingService()
+
+CONCURRENT_FETCHES = 10
 
 router = APIRouter()
 
@@ -46,43 +52,6 @@ def _build_confluence(workspace: Workspace) -> ConfluenceService:
     return ConfluenceService(base_url=base_url, api_token=api_token, email=email)
 
 
-async def _background_embed(workspace_id: str) -> None:
-    """Fetch content for any un-fetched pages and embed them. Runs after sync."""
-    async with AsyncSessionLocal() as session:
-        try:
-            workspace = await session.get(Workspace, workspace_id)
-            confluence_svc: ConfluenceService | None = None
-
-            if workspace:
-                try:
-                    confluence_svc = _build_confluence_from_values(
-                        base_url=workspace.confluence_base_url or settings.atlassian_base_url,
-                        email=workspace.confluence_email or settings.atlassian_mail,
-                        api_token_enc=workspace.confluence_api_token_enc,
-                    )
-                except Exception:
-                    confluence_svc = None
-
-            rows = (
-                await session.execute(
-                    sa_select(Page.id, Page.title).where(
-                        Page.workspace_id == workspace_id,
-                        (Page.content.is_(None)) | (Page.content == "")
-                    )
-                )
-            ).all()
-            if confluence_svc:
-                sync_svc = SyncService(session=session, confluence=confluence_svc, workspace_id=workspace_id)
-                for page_id, page_title in [(r.id, r.title) for r in rows]:
-                    try:
-                        await sync_svc.get_page_with_content(page_id, embedding_svc=_embed_svc)
-                    except Exception as exc:
-                        log.warning("background_embed: content fetch failed for %s: %s", page_id, exc)
-            await _embed_svc.embed_all_pages(session)
-        except Exception as exc:
-            log.error("background_embed: unexpected error: %s", exc)
-
-
 def _build_confluence_from_values(
     base_url: str,
     email: str,
@@ -100,6 +69,105 @@ def _build_confluence_from_values(
     if not api_token or not email:
         raise ValueError("Confluence credentials not available")
     return ConfluenceService(base_url=base_url, api_token=api_token, email=email)
+
+
+async def _background_embed(workspace_id: str) -> None:
+    """
+    Fetch content for un-fetched pages and embed them.
+    Runs concurrently (CONCURRENT_FETCHES at a time) with job progress tracking.
+    """
+    job_id = str(uuid.uuid4())
+
+    # Find pages needing content
+    async with AsyncSessionLocal() as session:
+        rows = (
+            await session.execute(
+                sa_select(Page.id, Page.title).where(
+                    Page.workspace_id == workspace_id,
+                    (Page.content.is_(None)) | (Page.content == "")
+                )
+            )
+        ).all()
+
+        if not rows:
+            await _embed_svc.embed_all_pages(session)
+            return
+
+        job = BackgroundJob(
+            id=job_id,
+            workspace_id=workspace_id,
+            job_type="embed",
+            status="running",
+            total=len(rows),
+            completed=0,
+            failed=0,
+        )
+        session.add(job)
+        await session.commit()
+
+    # Build Confluence service
+    async with AsyncSessionLocal() as session:
+        workspace = await session.get(Workspace, workspace_id)
+        if not workspace:
+            return
+        try:
+            confluence_svc = _build_confluence_from_values(
+                base_url=workspace.confluence_base_url or settings.atlassian_base_url,
+                email=workspace.confluence_email or settings.atlassian_mail,
+                api_token_enc=workspace.confluence_api_token_enc,
+            )
+        except Exception:
+            async with AsyncSessionLocal() as s:
+                job = await s.get(BackgroundJob, job_id)
+                if job:
+                    job.status = "failed"
+                    job.error = "Confluence credentials not available"
+                    job.completed_at = datetime.now(timezone.utc)
+                    s.add(job)
+                    await s.commit()
+            return
+
+    page_ids = [r.id for r in rows]
+    semaphore = asyncio.Semaphore(CONCURRENT_FETCHES)
+
+    async def fetch_one(page_id: str) -> bool:
+        async with semaphore:
+            try:
+                async with AsyncSessionLocal() as s:
+                    svc = SyncService(
+                        session=s,
+                        confluence=confluence_svc,
+                        workspace_id=workspace_id,
+                    )
+                    await svc.get_page_with_content(page_id, embedding_svc=_embed_svc)
+                    return True
+            except Exception as exc:
+                log.warning("embed: content fetch failed for %s: %s", page_id, exc)
+                return False
+
+    results = await asyncio.gather(*[fetch_one(pid) for pid in page_ids])
+    completed = sum(1 for r in results if r)
+    failed = sum(1 for r in results if not r)
+
+    # Final embedding pass over all pages with content
+    async with AsyncSessionLocal() as session:
+        await _embed_svc.embed_all_pages(session)
+
+    # Record job outcome
+    async with AsyncSessionLocal() as session:
+        job = await session.get(BackgroundJob, job_id)
+        if job:
+            job.status = "completed" if failed == 0 else "completed_with_errors"
+            job.completed = completed
+            job.failed = failed
+            job.completed_at = datetime.now(timezone.utc)
+            session.add(job)
+            await session.commit()
+
+    log.info(
+        "embed job %s complete: %d/%d pages fetched, %d failed",
+        job_id, completed, len(page_ids), failed,
+    )
 
 
 @router.post("/spaces")
@@ -137,6 +205,35 @@ async def sync_single_space(
         raise
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Sync failed: {exc}")
+
+
+@router.get("/jobs/latest")
+async def get_latest_job(
+    db: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+):
+    """Returns the latest embed job for this workspace. Frontend polls this during sync."""
+    job = (await db.execute(
+        sa_select(BackgroundJob)
+        .where(BackgroundJob.workspace_id == workspace.id)
+        .order_by(BackgroundJob.created_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+
+    if not job:
+        return None
+
+    return {
+        "id": job.id,
+        "job_type": job.job_type,
+        "status": job.status,
+        "total": job.total,
+        "completed": job.completed,
+        "failed": job.failed,
+        "progress_pct": round((job.completed / job.total * 100) if job.total > 0 else 0),
+        "created_at": job.created_at.isoformat(),
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+    }
 
 
 @router.get("/spaces")

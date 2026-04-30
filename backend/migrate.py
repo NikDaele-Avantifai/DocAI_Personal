@@ -155,6 +155,27 @@ MIGRATIONS = [
         ]
     ),
     (
+        '006_background_jobs',
+        'Add background jobs tracking table',
+        [
+            """CREATE TABLE IF NOT EXISTS background_jobs (
+                id VARCHAR PRIMARY KEY,
+                workspace_id VARCHAR NOT NULL,
+                job_type VARCHAR NOT NULL,
+                status VARCHAR NOT NULL DEFAULT 'pending',
+                total INTEGER NOT NULL DEFAULT 0,
+                completed INTEGER NOT NULL DEFAULT 0,
+                failed INTEGER NOT NULL DEFAULT 0,
+                error TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                completed_at TIMESTAMPTZ
+            )""",
+            "CREATE INDEX IF NOT EXISTS ix_background_jobs_workspace_id ON background_jobs(workspace_id)",
+            "CREATE INDEX IF NOT EXISTS ix_background_jobs_status ON background_jobs(status)",
+        ]
+    ),
+    (
         '003_clear_encrypted_tokens_after_key_hardening',
         'Clear Confluence tokens after encryption key hardening (users must re-enter)',
         [

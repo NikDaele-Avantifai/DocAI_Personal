@@ -46,6 +46,8 @@ export default function Layout() {
   const [pendingCount, setPendingCount] = useState(0)
   const [lastSync, setLastSync] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(false)
+  const [syncJob, setSyncJob] = useState<{ status: string; completed: number; total: number } | null>(null)
+  const syncPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [notifCount, setNotifCount] = useState(0)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const profileRef = useRef<HTMLDivElement>(null)
@@ -98,6 +100,11 @@ export default function Layout() {
     return () => document.removeEventListener("mousedown", handleClick)
   }, [profileOpen])
 
+  // Clean up sync poll interval on unmount
+  useEffect(() => {
+    return () => { if (syncPollRef.current) clearInterval(syncPollRef.current) }
+  }, [])
+
   // Listen for auto-collapse signal from analysis completion
   useEffect(() => {
     function handleCollapse() { setSidebarCollapsed(true) }
@@ -105,16 +112,39 @@ export default function Layout() {
     return () => window.removeEventListener("docai:sidebarcollapse", handleCollapse)
   }, [])
 
+  function startJobPolling() {
+    if (syncPollRef.current) clearInterval(syncPollRef.current)
+    syncPollRef.current = setInterval(async () => {
+      try {
+        const res = await authFetch(`${API_BASE}/api/sync/jobs/latest`)
+        const job = await res.json()
+        if (!job) return
+        setSyncJob({ status: job.status, completed: job.completed, total: job.total })
+        if (job.status !== "running") {
+          clearInterval(syncPollRef.current!)
+          syncPollRef.current = null
+          setSyncing(false)
+        }
+      } catch {
+        clearInterval(syncPollRef.current!)
+        syncPollRef.current = null
+        setSyncing(false)
+      }
+    }, 3000)
+  }
+
   async function handleSync() {
     setSyncing(true)
+    setSyncJob(null)
     try {
       await authFetch(`${API_BASE}/api/sync/spaces`, { method: "POST" })
       const now = new Date().toISOString()
       setLastSync(now)
-      // Notify all pages to re-fetch their data without a browser refresh
       window.dispatchEvent(new CustomEvent("docai:synccomplete"))
-    } catch {}
-    setSyncing(false)
+      startJobPolling()
+    } catch {
+      setSyncing(false)
+    }
   }
 
   const pageInfo = PAGE_TITLES[location.pathname] ?? { title: "DocAI", breadcrumb: ["DocAI"] }
@@ -279,9 +309,18 @@ export default function Layout() {
               className="topbar-sync-btn"
               onClick={handleSync}
               disabled={syncing}>
-              {syncing ? "⟳ Syncing…" : "⟳ Sync Confluence"}
-              {lastSync && (
+              {syncing && syncJob?.status === "running" && syncJob.total > 0
+                ? `⟳ Indexing ${syncJob.completed}/${syncJob.total}…`
+                : syncing
+                ? "⟳ Syncing…"
+                : syncJob?.status === "completed_with_errors"
+                ? "⟳ Sync Confluence"
+                : "⟳ Sync Confluence"}
+              {!syncing && lastSync && (
                 <span className="topbar-sync-time">{relativeTime(lastSync)}</span>
+              )}
+              {!syncing && syncJob?.status === "completed_with_errors" && (
+                <span className="topbar-sync-time" style={{ color: "var(--amber, #b45309)" }}>with errors</span>
               )}
             </button>
             <button
