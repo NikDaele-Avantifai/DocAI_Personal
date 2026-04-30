@@ -42,7 +42,7 @@ type StatsResponse = {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const SESSION_KEY = "docai_admin_token"
-const API_BASE = import.meta.env.VITE_API_URL ?? ""
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ""
 
 function getToken() {
   return sessionStorage.getItem(SESSION_KEY) ?? ""
