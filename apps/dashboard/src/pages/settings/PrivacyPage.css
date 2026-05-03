@@ -1,0 +1,165 @@
+.priv-root {
+  max-width: 680px;
+}
+
+.priv-page-header {
+  margin-bottom: 28px;
+}
+
+.priv-page-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-1);
+  margin: 0 0 6px;
+  letter-spacing: -0.02em;
+}
+
+.priv-page-sub {
+  font-size: 13px;
+  color: var(--text-3);
+  margin: 0;
+}
+
+.priv-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ── Standard card ─────────────────────────────────────────────────────────── */
+
+.priv-card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 24px;
+}
+
+.priv-card-header {
+  margin-bottom: 10px;
+}
+
+.priv-card-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-1);
+  margin: 0;
+}
+
+.priv-card-desc {
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.6;
+  margin: 0 0 18px;
+}
+
+/* ── Danger card ───────────────────────────────────────────────────────────── */
+
+.priv-danger-card {
+  background: #fff5f5;
+  border: 1px solid #fca5a5;
+  border-radius: 10px;
+  padding: 24px;
+}
+
+.priv-danger-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #dc2626;
+  margin: 0;
+}
+
+/* ── Buttons ───────────────────────────────────────────────────────────────── */
+
+.priv-btn {
+  padding: 9px 18px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 150ms;
+}
+.priv-btn:hover:not(:disabled) { background: var(--accent-hover, #2563eb); }
+.priv-btn:disabled { opacity: 0.55; cursor: default; }
+
+.priv-btn-danger {
+  padding: 9px 18px;
+  background: #dc2626;
+  color: #fff;
+  border: none;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 150ms;
+}
+.priv-btn-danger:hover:not(:disabled) { background: #b91c1c; }
+.priv-btn-danger:disabled { opacity: 0.45; cursor: default; }
+
+.priv-btn-cancel {
+  padding: 9px 18px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 150ms;
+}
+.priv-btn-cancel:hover:not(:disabled) { background: var(--surface-3); }
+.priv-btn-cancel:disabled { opacity: 0.55; cursor: default; }
+
+/* ── Confirmation box ──────────────────────────────────────────────────────── */
+
+.priv-confirm-box {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.priv-confirm-label {
+  font-size: 13px;
+  color: var(--text-2);
+  margin: 0;
+}
+
+.priv-confirm-input {
+  padding: 9px 12px;
+  border: 1px solid #fca5a5;
+  border-radius: 7px;
+  font-size: 13px;
+  font-family: monospace;
+  background: #fff;
+  color: var(--text-1);
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+.priv-confirm-input:focus { border-color: #dc2626; box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.15); }
+
+.priv-confirm-actions {
+  display: flex;
+  gap: 10px;
+}
+
+/* ── States ────────────────────────────────────────────────────────────────── */
+
+.priv-error {
+  font-size: 13px;
+  color: #dc2626;
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  border-radius: 7px;
+  padding: 10px 14px;
+}
+
+.priv-restricted {
+  font-size: 13px;
+  color: var(--text-3);
+  margin: 0;
+}

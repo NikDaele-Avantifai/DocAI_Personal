@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select, delete as sql_delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -339,3 +339,153 @@ async def cancel_invite(
         sql_delete(WorkspaceInvite).where(WorkspaceInvite.id == invite_id)
     )
     return {"ok": True}
+
+
+# ── GDPR endpoints ─────────────────────────────────────────────────────────────
+
+@router.get("/export")
+async def export_workspace_data(
+    db: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    _user: dict = Depends(require_admin),
+):
+    """GDPR Article 15 — Right of access. Returns all data DocAI holds for this workspace."""
+    from app.models.page import Page, Space
+    from app.models.audit import AuditEntry
+    from app.models.sweep import WorkspaceSweep
+    from app.models.usage import WorkspaceUsage, UsageEvent
+
+    wid = workspace.id
+
+    pages = (await db.execute(select(Page).where(Page.workspace_id == wid))).scalars().all()
+    spaces = (await db.execute(select(Space).where(Space.workspace_id == wid))).scalars().all()
+    audit = (await db.execute(select(AuditEntry).where(AuditEntry.workspace_id == wid))).scalars().all()
+    sweeps = (await db.execute(select(WorkspaceSweep).where(WorkspaceSweep.workspace_id == wid))).scalars().all()
+    usage = (await db.execute(select(WorkspaceUsage).where(WorkspaceUsage.workspace_id == wid))).scalars().all()
+    events = (await db.execute(select(UsageEvent).where(UsageEvent.workspace_id == wid))).scalars().all()
+    members = (await db.execute(
+        select(WorkspaceMember).where(WorkspaceMember.workspace_id == wid)
+    )).scalars().all()
+
+    return {
+        "export_date": datetime.now(timezone.utc).isoformat(),
+        "workspace": {
+            "id": workspace.id,
+            "owner_email": workspace.owner_email,
+            "confluence_base_url": workspace.confluence_base_url,
+            "confluence_email": workspace.confluence_email,
+            "plan": workspace.plan,
+            "created_at": workspace.created_at.isoformat(),
+        },
+        "pages": [
+            {
+                "id": p.id,
+                "title": p.title,
+                "space_key": p.space_key,
+                "word_count": p.word_count,
+                "is_healthy": p.is_healthy,
+                "last_modified": p.last_modified,
+                "synced_at": p.synced_at.isoformat() if p.synced_at else None,
+            }
+            for p in pages
+        ],
+        "spaces": [
+            {
+                "key": s.key,
+                "name": s.name,
+                "page_count": s.page_count,
+                "last_synced": s.last_synced.isoformat() if s.last_synced else None,
+            }
+            for s in spaces
+        ],
+        "audit_log": [
+            {
+                "id": e.id,
+                "page_title": e.page_title,
+                "action": e.action,
+                "decision": e.decision,
+                "reviewed_by": e.reviewed_by,
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+            }
+            for e in audit
+        ],
+        "sweeps": [
+            {
+                "id": s.id,
+                "status": s.status,
+                "pages_scanned": s.pages_scanned,
+                "pages_healthy": s.pages_healthy,
+                "completed_at": s.completed_at.isoformat() if s.completed_at else None,
+            }
+            for s in sweeps
+        ],
+        "usage": [
+            {
+                "period": u.period,
+                "analyses_count": u.analyses_count,
+                "chat_count": u.chat_count,
+                "rename_count": u.rename_count,
+            }
+            for u in usage
+        ],
+        "team_members": [
+            {
+                "email": m.user_email,
+                "role": m.role,
+                "joined_at": m.joined_at.isoformat() if m.joined_at else None,
+            }
+            for m in members
+        ],
+        "total_records": {
+            "pages": len(pages),
+            "audit_entries": len(audit),
+            "sweeps": len(sweeps),
+            "usage_events": len(events),
+        },
+    }
+
+
+@router.delete("/")
+async def delete_workspace(
+    x_confirm_deletion: str = Header(...),
+    db: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    _user: dict = Depends(require_admin),
+):
+    """GDPR Article 17 — Right to erasure. Permanently deletes all workspace data."""
+    import logging
+
+    if x_confirm_deletion != "DELETE MY WORKSPACE":
+        raise HTTPException(
+            status_code=400,
+            detail="Missing confirmation. Send header: X-Confirm-Deletion: DELETE MY WORKSPACE",
+        )
+
+    from app.models.page import Page, Space
+    from app.models.audit import AuditEntry
+    from app.models.sweep import WorkspaceSweep
+    from app.models.page_analysis import PageAnalysis
+    from app.models.snapshot import Snapshot
+    from app.models.dismissed_issue import DismissedIssue
+    from app.models.usage import WorkspaceUsage, UsageEvent
+    from app.models.analysis_settings import WorkspaceSettings
+    from app.models.job import BackgroundJob
+
+    wid = workspace.id
+
+    for model in [
+        UsageEvent, WorkspaceUsage, WorkspaceMember, WorkspaceInvite,
+        DismissedIssue, Snapshot, PageAnalysis, AuditEntry,
+        WorkspaceSweep, Page, Space, WorkspaceSettings, BackgroundJob,
+    ]:
+        await db.execute(sql_delete(model).where(model.workspace_id == wid))
+
+    await db.execute(sql_delete(Workspace).where(Workspace.id == wid))
+
+    logging.getLogger(__name__).info("GDPR deletion completed for workspace %s", wid)
+
+    return {
+        "ok": True,
+        "message": "All workspace data has been permanently deleted.",
+        "workspace_id": wid,
+    }

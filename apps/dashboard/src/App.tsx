@@ -22,6 +22,7 @@ import SettingsPage from "./pages/SettingsPage"
 import UsagePage from "./pages/UsagePage"
 import SettingsLayout from "./components/SettingsLayout"
 import TeamPage from "./pages/settings/TeamPage"
+import PrivacyPage from "./pages/settings/PrivacyPage"
 
 /** Redirects to /settings if Confluence is not yet connected and onboarding is incomplete. */
 function OnboardingGuard({ children }: { children: React.ReactNode }) {
@@ -87,6 +88,7 @@ function App({ bypassAuth = false }: AppProps) {
                   <Route path="/settings"              element={<SettingsPage />} />
                   <Route path="/settings/usage"        element={<UsagePage />} />
                   <Route path="/settings/team"         element={<TeamPage />} />
+                  <Route path="/settings/privacy"      element={<PrivacyPage />} />
                   <Route path="/settings/:tab"         element={<SettingsPage />} />
                 </Route>
               </Routes>
