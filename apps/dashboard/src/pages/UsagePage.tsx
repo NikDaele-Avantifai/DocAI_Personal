@@ -303,7 +303,7 @@ export default function UsagePage() {
             </div>
             <a
               className="usage-banner-btn"
-              href="mailto:nikolaidaelemans@avantifai.com">
+              href="mailto:nikolaidaelemans@avantifai.com?subject=DocAI%20Plan%20Upgrade&body=Hi%2C%20I%27d%20like%20to%20upgrade%20my%20DocAI%20plan.">
               Contact Sales
             </a>
           </div>
@@ -340,6 +340,22 @@ export default function UsagePage() {
                 style={sub.danger ? { color: 'var(--red-text)' } : sub.warn ? { color: 'var(--amber-text)' } : undefined}>
                 {sub.text}
               </div>
+              {m.percentage !== null && m.percentage >= 100 && (
+                <div className="usage-limit-reached">
+                  Limit reached —{" "}
+                  <a href="mailto:nikolaidaelemans@avantifai.com?subject=DocAI%20Plan%20Upgrade" className="usage-upgrade-link usage-upgrade-link-urgent">
+                    contact us to upgrade
+                  </a>
+                </div>
+              )}
+              {m.percentage !== null && m.percentage >= 80 && m.percentage < 100 && (
+                <div className="usage-upgrade-nudge">
+                  Running low —{" "}
+                  <a href="mailto:nikolaidaelemans@avantifai.com?subject=DocAI%20Plan%20Upgrade" className="usage-upgrade-link">
+                    upgrade your plan
+                  </a>
+                </div>
+              )}
             </div>
           )
         })}
@@ -459,6 +475,26 @@ export default function UsagePage() {
                 </div>
               ))}
             </div>
+            {(plan === 'trial' || plan === 'starter') && (
+              <div className="usage-plan-cta">
+                <div className="usage-plan-cta-text">Need more capacity or enterprise features?</div>
+                <a
+                  href="mailto:nikolaidaelemans@avantifai.com?subject=DocAI%20Plan%20Upgrade%20Enquiry"
+                  className="usage-plan-cta-btn">
+                  Talk to us about upgrading →
+                </a>
+              </div>
+            )}
+            {plan === 'growth' && (
+              <div className="usage-plan-cta">
+                <div className="usage-plan-cta-text">Need unlimited capacity and dedicated support?</div>
+                <a
+                  href="mailto:nikolaidaelemans@avantifai.com?subject=DocAI%20Scale%20Plan%20Enquiry"
+                  className="usage-plan-cta-btn">
+                  Ask about Scale plan →
+                </a>
+              </div>
+            )}
           </div>
         </div>
 

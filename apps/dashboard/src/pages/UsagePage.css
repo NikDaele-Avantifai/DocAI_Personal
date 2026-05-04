@@ -489,3 +489,57 @@
   flex-direction: column;
   gap: 10px;
 }
+
+/* ── Upgrade nudges ──────────────────────────────────────────────────────────── */
+
+.usage-upgrade-nudge {
+  font-size: 12px;
+  color: var(--amber-text, #b45309);
+  margin-top: 6px;
+}
+
+.usage-limit-reached {
+  font-size: 12px;
+  color: var(--red-text, #dc2626);
+  margin-top: 6px;
+}
+
+.usage-upgrade-link {
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.usage-upgrade-link-urgent {
+  color: var(--red-text, #dc2626);
+}
+
+.usage-plan-cta {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.usage-plan-cta-text {
+  font-size: 12px;
+  color: var(--text-2);
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+
+.usage-plan-cta-btn {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+  padding: 6px 14px;
+  border: 1px solid var(--accent-border, #bfdbfe);
+  border-radius: 6px;
+  background: var(--accent-light, #dbeafe);
+  transition: background 150ms ease;
+}
+
+.usage-plan-cta-btn:hover {
+  background: var(--bg-active, #eff6ff);
+}

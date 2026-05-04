@@ -9,9 +9,7 @@ const SETTINGS_NAV = [
   { to: "/settings/profile",          label: "Profile",      icon: "◉"              },
   { to: "/settings/team",             label: "Team",         icon: "⊞"              },
   { to: "/settings/integrations",     label: "Integrations", icon: "⌁"              },
-  { to: "/settings/preferences",      label: "Preferences",  icon: "◎"              },
   { to: "/settings/usage",            label: "Usage",        icon: "∥"              },
-  { to: "/settings/analysis",         label: "Analysis",     icon: "◈"              },
   { to: "/settings/privacy",          label: "Privacy",      icon: "⛨"              },
   { to: "/settings/about",            label: "About",        icon: "ℹ"              },
 ]

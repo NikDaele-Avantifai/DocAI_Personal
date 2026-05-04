@@ -68,8 +68,6 @@ const FOCUS_OPTIONS: { id: AnalysisSettingsData["focus_mode"]; label: string; de
 const OVERVIEW_ITEMS: { tab: Exclude<Tab, "overview">; label: string; description: string; icon: string }[] = [
   { tab: "profile",      label: "Profile",      description: "Your name, email, and role within DocAI.",                          icon: "◉" },
   { tab: "integrations", label: "Integrations", description: "Connect DocAI to your Atlassian Confluence workspace.",             icon: "⌁" },
-  { tab: "preferences",  label: "Preferences",  description: "Similarity thresholds, sync frequency, and notifications.",        icon: "◎" },
-  { tab: "analysis",     label: "Analysis",     description: "Issue detectors, confidence threshold, and focus mode.",           icon: "◈" },
   { tab: "privacy",      label: "Privacy",      description: "How DocAI handles your data and what stays on your device.",       icon: "⛨" },
   { tab: "about",        label: "About",        description: "Version info, API health status, and tech stack.",                 icon: "ℹ" },
 ]

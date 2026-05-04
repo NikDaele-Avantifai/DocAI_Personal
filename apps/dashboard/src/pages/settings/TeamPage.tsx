@@ -1,13 +1,14 @@
 import { useState, useEffect } from "react"
 import { apiClient } from "@/lib/api"
-import { useRole } from "@/contexts/WorkspaceContext"
+import { useRole, useWorkspace } from "@/contexts/WorkspaceContext"
+import { useAuth } from "@/contexts/AuthContext"
 import { AdminOnly } from "@/components/AdminOnly"
 import "./TeamPage.css"
 
 interface Member {
   id: number
   email: string
-  role: "admin" | "viewer"
+  role: "admin" | "editor" | "viewer"
   joined_at: string
   invited_by: string | null
 }
@@ -15,7 +16,7 @@ interface Member {
 interface PendingInvite {
   id: number
   email: string
-  role: "admin" | "viewer"
+  role: "admin" | "editor" | "viewer"
   expires_at: string
   invited_by: string | null
 }
@@ -42,6 +43,8 @@ function RoleBadge({ role }: { role: string }) {
 
 export default function TeamPage() {
   const { isAdmin } = useRole()
+  const { workspace } = useWorkspace()
+  const { user } = useAuth()
   const [data, setData] = useState<MembersData | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -161,7 +164,9 @@ export default function TeamPage() {
               {/* Owner row — always first */}
               {data?.owner && (
                 <div className="team-member-row">
-                  <div className="team-member-email">{data.owner.email || "—"}</div>
+                  <div className="team-member-email">
+                    {data.owner.email || workspace?.owner_email || user?.email || "—"}
+                  </div>
                   <div className="team-member-meta">
                     <RoleBadge role="admin" />
                     <span className="team-owner-tag">Owner</span>

@@ -1,0 +1,184 @@
+.prof-root {
+  max-width: 560px;
+}
+
+.prof-page-header {
+  margin-bottom: 24px;
+}
+
+.prof-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-1);
+  margin: 0 0 6px;
+  letter-spacing: -0.02em;
+}
+
+.prof-subtitle {
+  font-size: 13px;
+  color: var(--text-3);
+  margin: 0;
+}
+
+/* ── Card ──────────────────────────────────────────────────────────────────── */
+
+.prof-card {
+  background: var(--surface-1, #fff);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.prof-avatar-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 20px 24px;
+}
+
+.prof-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  letter-spacing: -0.02em;
+}
+
+.prof-avatar-info {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.prof-avatar-email {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-1);
+}
+
+.prof-divider {
+  height: 1px;
+  background: var(--border);
+}
+
+/* ── Fields ────────────────────────────────────────────────────────────────── */
+
+.prof-fields {
+  display: flex;
+  flex-direction: column;
+}
+
+.prof-field {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 16px;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border-light, #f1f5f9);
+  align-items: start;
+}
+
+.prof-field:last-child {
+  border-bottom: none;
+}
+
+.prof-field-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding-top: 2px;
+}
+
+.prof-field-value {
+  font-size: 14px;
+  color: var(--text-1);
+}
+
+.prof-field-note {
+  grid-column: 2;
+  font-size: 11px;
+  color: var(--text-3);
+  margin-top: 3px;
+}
+
+.prof-field-empty {
+  color: var(--text-3);
+  font-style: italic;
+}
+
+.prof-workspace-url {
+  font-size: 13px;
+  color: var(--text-2);
+  font-family: monospace;
+}
+
+.prof-plan-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.prof-trial-days {
+  font-size: 12px;
+  color: var(--amber, #b45309);
+  font-weight: 500;
+}
+
+/* ── Role badges ───────────────────────────────────────────────────────────── */
+
+.prof-role-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+
+.prof-role-admin  { background: var(--accent-light, #dbeafe); color: var(--accent, #1e40af); }
+.prof-role-editor { background: var(--green-light, #dcfce7);  color: var(--green, #166534); }
+.prof-role-viewer { background: var(--surface-2);             color: var(--text-2); }
+
+/* ── Plan badges ───────────────────────────────────────────────────────────── */
+
+.prof-plan-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+
+.prof-plan-trial   { background: var(--amber-light, #fef3c7); color: var(--amber, #92400e); }
+.prof-plan-starter { background: var(--surface-2);            color: var(--text-2); }
+.prof-plan-growth  { background: var(--accent-light, #dbeafe); color: var(--accent, #1e40af); }
+.prof-plan-scale   { background: var(--green-light, #dcfce7);  color: var(--green, #166534); }
+.prof-plan-expired { background: #fee2e2;                     color: #991b1b; }
+
+/* ── Footer note ───────────────────────────────────────────────────────────── */
+
+.prof-footer-note {
+  font-size: 13px;
+  color: var(--text-3);
+  margin: 16px 0 0;
+  line-height: 1.5;
+}
+
+.prof-footer-note a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.prof-footer-note a:hover {
+  text-decoration: underline;
+}
