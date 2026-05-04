@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect } from "react"
 import "./AdminDashboard.css"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -37,6 +37,59 @@ type StatsResponse = {
     total_analyses: number
     total_chat_messages: number
   }
+}
+
+type TeamMember = {
+  id: number
+  email: string
+  role: string
+  joined_at: string | null
+}
+
+type MonthlyTrend = {
+  period: string
+  analyses: number
+  chat: number
+  rename: number
+  duplication_scans: number
+}
+
+type TokenUsage = {
+  claude_input_tokens: number
+  claude_output_tokens: number
+  claude_cost_usd: number
+  claude_cost_eur: number
+  voyage_tokens: number
+  voyage_cost_usd: number
+  voyage_cost_eur: number
+  total_cost_usd: number
+  total_cost_eur: number
+}
+
+type WorkspaceDetail = {
+  id: string
+  owner_email: string | null
+  owner_sub: string
+  plan: string
+  effective_plan: string
+  trial_ends_at: string | null
+  is_trial_expired: boolean
+  confluence_connected: boolean
+  confluence_base_url: string | null
+  confluence_email: string | null
+  onboarding_completed: boolean
+  created_at: string
+  updated_at: string
+  current_month_usage: {
+    period: string
+    analyses: number
+    chat: number
+    rename: number
+    duplication_scans: number
+  }
+  monthly_trend: MonthlyTrend[]
+  token_usage: TokenUsage
+  team_members: TeamMember[]
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -131,81 +184,384 @@ function PlanBadge({ plan }: { plan: string }) {
   )
 }
 
-// ── Actions dropdown ──────────────────────────────────────────────────────────
+// ── Workspace detail page ─────────────────────────────────────────────────────
 
-const PLAN_ACTIONS = [
-  { label: "Upgrade to Starter", plan: "starter" },
-  { label: "Upgrade to Growth",  plan: "growth"  },
-  { label: "Upgrade to Scale",   plan: "scale"   },
-  { label: "Reset to Trial",     plan: "trial"   },
-]
-
-function ActionsMenu({
-  ws,
-  onPlanChange,
+function WorkspaceDetailPage({
+  workspaceId,
+  onBack,
   onToast,
 }: {
-  ws: WorkspaceRow
-  onPlanChange: () => void
+  workspaceId: string
+  onBack: () => void
   onToast: (msg: string) => void
 }) {
-  const [open, setOpen] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
+  const [detail, setDetail] = useState<WorkspaceDetail | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    function handler(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    if (open) document.addEventListener("mousedown", handler)
-    return () => document.removeEventListener("mousedown", handler)
-  }, [open])
+  const [editingEmail, setEditingEmail] = useState(false)
+  const [emailValue, setEmailValue] = useState("")
+  const [savingEmail, setSavingEmail] = useState(false)
 
-  async function setPlan(plan: string) {
-    setOpen(false)
-    setBusy(true)
+  const [changingPlan, setChangingPlan] = useState(false)
+
+  const [showDelete, setShowDelete] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState("")
+  const [deleting, setDeleting] = useState(false)
+
+  async function load() {
+    setLoading(true)
+    setError(null)
     try {
-      await adminFetch(`/api/admin/workspaces/${ws.id}/plan`, {
+      const d = await adminFetch(`/api/admin/workspaces/${workspaceId}`)
+      setDetail(d)
+      setEmailValue(d.owner_email ?? "")
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { load() }, [workspaceId])
+
+  async function saveEmail() {
+    setSavingEmail(true)
+    try {
+      await adminFetch(`/api/admin/workspaces/${workspaceId}/email`, {
+        method: "PATCH",
+        body: JSON.stringify({ email: emailValue }),
+      })
+      onToast("Email updated")
+      setEditingEmail(false)
+      await load()
+    } catch (e: unknown) {
+      onToast(`Error: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setSavingEmail(false)
+    }
+  }
+
+  async function changePlan(plan: string) {
+    setChangingPlan(true)
+    try {
+      await adminFetch(`/api/admin/workspaces/${workspaceId}/plan`, {
         method: "PATCH",
         body: JSON.stringify({ plan }),
       })
       onToast(`Plan updated to ${plan}`)
-      onPlanChange()
-    } catch (err: unknown) {
-      onToast(`Error: ${err instanceof Error ? err.message : String(err)}`)
+      await load()
+    } catch (e: unknown) {
+      onToast(`Error: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
-      setBusy(false)
+      setChangingPlan(false)
     }
   }
 
-  function copyId() {
-    setOpen(false)
-    navigator.clipboard.writeText(ws.id)
-    onToast("Workspace ID copied")
+  async function deleteWorkspace() {
+    if (deleteConfirm !== workspaceId) return
+    setDeleting(true)
+    try {
+      await adminFetch(`/api/admin/workspaces/${workspaceId}`, { method: "DELETE" })
+      onToast("Workspace deleted")
+      onBack()
+    } catch (e: unknown) {
+      onToast(`Error: ${e instanceof Error ? e.message : String(e)}`)
+      setDeleting(false)
+    }
   }
 
+  if (loading) return <div className="adm-detail-loading">Loading workspace…</div>
+  if (error)   return <div className="adm-detail-error">⚠ {error}</div>
+  if (!detail) return null
+
+  const plans = ["trial", "starter", "growth", "scale"]
+
   return (
-    <div className="adm-actions-wrap" ref={ref}>
-      <button
-        className="adm-dot-btn"
-        disabled={busy}
-        onClick={() => setOpen(o => !o)}
-        title="Actions">
-        {busy ? "…" : "⋯"}
-      </button>
-      {open && (
-        <div className="adm-dropdown">
-          {PLAN_ACTIONS.filter(a => a.plan !== ws.plan).map(a => (
-            <button key={a.plan} className="adm-dropdown-item" onClick={() => setPlan(a.plan)}>
-              {a.label}
-            </button>
-          ))}
-          <div className="adm-dropdown-sep" />
-          <button className="adm-dropdown-item" onClick={copyId}>
-            Copy workspace ID
-          </button>
+    <div className="adm-detail-root">
+      <div className="adm-detail-header">
+        <button className="adm-back-btn" onClick={onBack}>← Back to workspaces</button>
+        <span className="adm-detail-header-title">{detail.owner_email ?? detail.id}</span>
+        <PlanBadge plan={detail.is_trial_expired ? "expired" : detail.plan} />
+      </div>
+
+      <div className="adm-detail-body">
+
+        {/* Left column */}
+        <div className="adm-detail-col">
+
+          <div className="adm-detail-card">
+            <div className="adm-detail-card-title">Account</div>
+
+            <div className="adm-detail-field">
+              <div className="adm-detail-field-label">Owner email</div>
+              {editingEmail ? (
+                <div className="adm-detail-field-edit">
+                  <input
+                    className="adm-detail-input"
+                    value={emailValue}
+                    onChange={e => setEmailValue(e.target.value)}
+                    type="email"
+                    autoFocus
+                  />
+                  <button className="adm-detail-btn-primary" onClick={saveEmail} disabled={savingEmail}>
+                    {savingEmail ? "Saving…" : "Save"}
+                  </button>
+                  <button className="adm-detail-btn-ghost" onClick={() => { setEditingEmail(false); setEmailValue(detail.owner_email ?? "") }}>
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <div className="adm-detail-field-value">
+                  {detail.owner_email ?? "—"}
+                  <button className="adm-detail-edit-link" onClick={() => setEditingEmail(true)}>Edit</button>
+                </div>
+              )}
+            </div>
+
+            <div className="adm-detail-field">
+              <div className="adm-detail-field-label">Auth0 subject</div>
+              <div className="adm-detail-field-value adm-detail-mono">{detail.owner_sub}</div>
+            </div>
+
+            <div className="adm-detail-field">
+              <div className="adm-detail-field-label">Workspace ID</div>
+              <div className="adm-detail-field-value adm-detail-mono">{detail.id}</div>
+            </div>
+
+            <div className="adm-detail-field">
+              <div className="adm-detail-field-label">Created</div>
+              <div className="adm-detail-field-value">{formatDate(detail.created_at)}</div>
+            </div>
+
+            <div className="adm-detail-field">
+              <div className="adm-detail-field-label">Last updated</div>
+              <div className="adm-detail-field-value">{formatDate(detail.updated_at)}</div>
+            </div>
+
+            <div className="adm-detail-field">
+              <div className="adm-detail-field-label">Onboarding</div>
+              <div className="adm-detail-field-value">
+                {detail.onboarding_completed ? "✓ Completed" : "⚠ Incomplete"}
+              </div>
+            </div>
+          </div>
+
+          <div className="adm-detail-card">
+            <div className="adm-detail-card-title">Plan</div>
+
+            <div className="adm-detail-field">
+              <div className="adm-detail-field-label">Current plan</div>
+              <div className="adm-detail-field-value">
+                <PlanBadge plan={detail.is_trial_expired ? "expired" : detail.plan} />
+              </div>
+            </div>
+
+            {detail.trial_ends_at && (
+              <div className="adm-detail-field">
+                <div className="adm-detail-field-label">Trial ends</div>
+                <div className="adm-detail-field-value">{formatDate(detail.trial_ends_at)}</div>
+              </div>
+            )}
+
+            <div className="adm-detail-field">
+              <div className="adm-detail-field-label">Change plan</div>
+              <div className="adm-detail-plan-btns">
+                {plans.filter(p => p !== detail.plan).map(p => (
+                  <button key={p} className="adm-detail-plan-btn" disabled={changingPlan} onClick={() => changePlan(p)}>
+                    {PLAN_LABEL[p]}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="adm-detail-card">
+            <div className="adm-detail-card-title">Confluence</div>
+
+            <div className="adm-detail-field">
+              <div className="adm-detail-field-label">Status</div>
+              <div className="adm-detail-field-value">
+                {detail.confluence_connected
+                  ? <span className="adm-connected">✓ Connected</span>
+                  : <span className="adm-disconnected">✗ Not connected</span>}
+              </div>
+            </div>
+
+            {detail.confluence_base_url && (
+              <div className="adm-detail-field">
+                <div className="adm-detail-field-label">Base URL</div>
+                <div className="adm-detail-field-value adm-detail-mono" style={{ fontSize: 12 }}>
+                  {detail.confluence_base_url}
+                </div>
+              </div>
+            )}
+
+            {detail.confluence_email && (
+              <div className="adm-detail-field">
+                <div className="adm-detail-field-label">API email</div>
+                <div className="adm-detail-field-value">{detail.confluence_email}</div>
+              </div>
+            )}
+          </div>
+
+          <div className="adm-detail-card">
+            <div className="adm-detail-card-title">Team members ({detail.team_members.length + 1})</div>
+            <div className="adm-detail-members">
+              <div className="adm-detail-member-row">
+                <span className="adm-detail-member-email">{detail.owner_email ?? "—"}</span>
+                <span className="adm-detail-member-role owner">Owner</span>
+              </div>
+              {detail.team_members.map(m => (
+                <div key={m.id} className="adm-detail-member-row">
+                  <span className="adm-detail-member-email">{m.email}</span>
+                  <span className={`adm-detail-member-role ${m.role}`}>{m.role}</span>
+                </div>
+              ))}
+              {detail.team_members.length === 0 && (
+                <div className="adm-detail-empty-row">No additional members</div>
+              )}
+            </div>
+          </div>
+
         </div>
-      )}
+
+        {/* Right column */}
+        <div className="adm-detail-col">
+
+          <div className="adm-detail-card">
+            <div className="adm-detail-card-title">Usage — {detail.current_month_usage.period}</div>
+            <div className="adm-detail-usage-grid">
+              {[
+                { label: "Page analyses",      value: detail.current_month_usage.analyses },
+                { label: "Chat messages",       value: detail.current_month_usage.chat },
+                { label: "Batch renames",       value: detail.current_month_usage.rename },
+                { label: "Duplication scans",   value: detail.current_month_usage.duplication_scans },
+              ].map(item => (
+                <div key={item.label} className="adm-detail-usage-item">
+                  <div className="adm-detail-usage-value">{item.value}</div>
+                  <div className="adm-detail-usage-label">{item.label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="adm-detail-card">
+            <div className="adm-detail-card-title">3-Month Trend</div>
+            <table className="adm-detail-trend-table">
+              <thead>
+                <tr>
+                  <th>Period</th>
+                  <th>Analyses</th>
+                  <th>Chat</th>
+                  <th>Renames</th>
+                  <th>Scans</th>
+                </tr>
+              </thead>
+              <tbody>
+                {detail.monthly_trend.map(t => (
+                  <tr key={t.period}>
+                    <td className="adm-detail-mono">{t.period}</td>
+                    <td>{t.analyses}</td>
+                    <td>{t.chat}</td>
+                    <td>{t.rename}</td>
+                    <td>{t.duplication_scans}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="adm-detail-card">
+            <div className="adm-detail-card-title">API Cost (All Time)</div>
+
+            <div className="adm-detail-cost-section">
+              <div className="adm-detail-cost-label">Claude (Anthropic)</div>
+              <div className="adm-detail-cost-row">
+                <span>Input tokens</span>
+                <span>{detail.token_usage.claude_input_tokens.toLocaleString()}</span>
+              </div>
+              <div className="adm-detail-cost-row">
+                <span>Output tokens</span>
+                <span>{detail.token_usage.claude_output_tokens.toLocaleString()}</span>
+              </div>
+              <div className="adm-detail-cost-row adm-detail-cost-total">
+                <span>Cost</span>
+                <span>
+                  ${detail.token_usage.claude_cost_usd.toFixed(4)}
+                  <span className="adm-detail-cost-eur"> / €{detail.token_usage.claude_cost_eur.toFixed(4)}</span>
+                </span>
+              </div>
+            </div>
+
+            <div className="adm-detail-cost-section">
+              <div className="adm-detail-cost-label">Voyage AI</div>
+              <div className="adm-detail-cost-row">
+                <span>Tokens embedded</span>
+                <span>{detail.token_usage.voyage_tokens.toLocaleString()}</span>
+              </div>
+              <div className="adm-detail-cost-row adm-detail-cost-total">
+                <span>Cost</span>
+                <span>
+                  ${detail.token_usage.voyage_cost_usd.toFixed(4)}
+                  <span className="adm-detail-cost-eur"> / €{detail.token_usage.voyage_cost_eur.toFixed(4)}</span>
+                </span>
+              </div>
+            </div>
+
+            <div className="adm-detail-cost-grand-total">
+              <span>Total estimated cost</span>
+              <span>
+                ${detail.token_usage.total_cost_usd.toFixed(2)}
+                <span className="adm-detail-cost-eur"> / €{detail.token_usage.total_cost_eur.toFixed(2)}</span>
+              </span>
+            </div>
+
+            <div className="adm-detail-cost-note">
+              Token tracking requires track_claude_usage() to be called in analyze.py, chat.py, and batch.py.
+              Costs shown are all-time, not current month only.
+            </div>
+          </div>
+
+          <div className="adm-detail-card adm-detail-danger-card">
+            <div className="adm-detail-card-title adm-detail-danger-title">Danger Zone</div>
+
+            {!showDelete ? (
+              <>
+                <p className="adm-detail-danger-desc">
+                  Permanently delete this workspace and all associated data. This action cannot be undone.
+                </p>
+                <button className="adm-detail-danger-btn" onClick={() => setShowDelete(true)}>
+                  Delete workspace
+                </button>
+              </>
+            ) : (
+              <div className="adm-detail-delete-confirm">
+                <p className="adm-detail-danger-desc">Type the workspace ID to confirm deletion:</p>
+                <div className="adm-detail-mono adm-detail-delete-id">{workspaceId}</div>
+                <input
+                  className="adm-detail-input"
+                  placeholder="Paste workspace ID here"
+                  value={deleteConfirm}
+                  onChange={e => setDeleteConfirm(e.target.value)}
+                />
+                <div className="adm-detail-delete-actions">
+                  <button
+                    className="adm-detail-danger-btn-confirm"
+                    disabled={deleteConfirm !== workspaceId || deleting}
+                    onClick={deleteWorkspace}>
+                    {deleting ? "Deleting…" : "Permanently delete"}
+                  </button>
+                  <button className="adm-detail-btn-ghost" onClick={() => { setShowDelete(false); setDeleteConfirm("") }}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+        </div>
+      </div>
     </div>
   )
 }
@@ -225,6 +581,7 @@ export default function AdminDashboard() {
   const [planFilter, setPlanFilter] = useState<PlanFilter>("all")
   const [search, setSearch] = useState("")
   const [toast, setToast] = useState<string | null>(null)
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null)
 
   if (!hasToken) return <TokenEntry />
 
@@ -269,6 +626,24 @@ export default function AdminDashboard() {
     if (search && !(ws.owner_email ?? "").toLowerCase().includes(search.toLowerCase())) return false
     return true
   })
+
+  // Detail view
+  if (selectedWorkspaceId) {
+    return (
+      <div className="adm-root">
+        <div className="adm-header">
+          <span className="adm-header-title">DocAI Admin Dashboard</span>
+          <button className="adm-signout-btn" onClick={signOut}>Sign out</button>
+        </div>
+        <WorkspaceDetailPage
+          workspaceId={selectedWorkspaceId}
+          onBack={() => setSelectedWorkspaceId(null)}
+          onToast={showToast}
+        />
+        {toast && <div className="adm-toast">{toast}</div>}
+      </div>
+    )
+  }
 
   return (
     <div className="adm-root">
@@ -371,7 +746,20 @@ export default function AdminDashboard() {
                     </td>
                     <td className="adm-td-muted">{relativeTime(ws.created_at)}</td>
                     <td>
-                      <ActionsMenu ws={ws} onPlanChange={load} onToast={showToast} />
+                      <div className="adm-row-actions">
+                        <button
+                          className="adm-row-btn adm-row-btn-edit"
+                          onClick={() => setSelectedWorkspaceId(ws.id)}
+                          title="View details">
+                          Edit
+                        </button>
+                        <button
+                          className="adm-row-btn adm-row-btn-delete"
+                          onClick={() => setSelectedWorkspaceId(ws.id)}
+                          title="Delete workspace">
+                          ✕
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 )

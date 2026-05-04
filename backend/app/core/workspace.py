@@ -45,6 +45,11 @@ async def get_current_workspace(
 
     if workspace is not None:
         return workspace
+    
+    if workspace.owner_email is None and user.get("email"):
+        workspace.owner_email = user["email"]
+        db.add(workspace)
+        await db.flush()
 
     # 2. Check if user is already a member of another workspace
     member_result = await db.execute(
@@ -108,7 +113,7 @@ async def get_current_workspace(
         owner_sub=sub,
         owner_email=user.get("email"),
         plan="trial",
-        trial_ends_at=datetime.now(timezone.utc) + timedelta(days=14),
+        trial_ends_at=datetime.now(timezone.utc) + timedelta(days=7),
     )
     db.add(workspace)
     await db.flush()
