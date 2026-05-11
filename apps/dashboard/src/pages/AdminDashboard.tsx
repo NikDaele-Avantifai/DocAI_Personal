@@ -95,10 +95,20 @@ type WorkspaceDetail = {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const SESSION_KEY = "docai_admin_token"
+const ADMIN_TS_KEY = "docai_admin_ts"
+const ADMIN_SESSION_TTL = 4 * 60 * 60 * 1000 // 4 hours
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ""
 
 function getToken() {
-  return sessionStorage.getItem(SESSION_KEY) ?? ""
+  const token = sessionStorage.getItem(SESSION_KEY)
+  const ts = sessionStorage.getItem(ADMIN_TS_KEY)
+  if (!token || !ts) return ""
+  if (Date.now() - parseInt(ts) > ADMIN_SESSION_TTL) {
+    sessionStorage.removeItem(SESSION_KEY)
+    sessionStorage.removeItem(ADMIN_TS_KEY)
+    return ""
+  }
+  return token
 }
 
 async function adminFetch(path: string, options: RequestInit = {}) {
@@ -115,7 +125,10 @@ async function adminFetch(path: string, options: RequestInit = {}) {
     const body = await res.text()
     throw new Error(`${res.status}: ${body}`)
   }
-  return res.json()
+  const data = await res.json()
+  // Refresh activity timestamp on every successful request
+  sessionStorage.setItem(ADMIN_TS_KEY, Date.now().toString())
+  return data
 }
 
 function formatDate(iso: string | null) {
@@ -151,6 +164,7 @@ function TokenEntry() {
     e.preventDefault()
     if (!value.trim()) return
     sessionStorage.setItem(SESSION_KEY, value.trim())
+    sessionStorage.setItem(ADMIN_TS_KEY, Date.now().toString())
     window.location.reload()
   }
 

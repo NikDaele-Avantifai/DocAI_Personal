@@ -43,6 +43,11 @@ function Auth0LoginPage() {
   const navigate = useNavigate()
   const [accessError, setAccessError] = useState<string | null>(null)
   const [loginError, setLoginError] = useState<string | null>(null)
+  // Read session_expired reason synchronously before effects clear the URL
+  const [sessionExpired] = useState(() => {
+    const params = new URLSearchParams(window.location.search)
+    return params.get('reason') === 'session_expired'
+  })
   const [view, setView] = useState<View>("methods")
   const [email, setEmail] = useState("")
   const [sentEmail, setSentEmail] = useState("")
@@ -150,6 +155,17 @@ function Auth0LoginPage() {
         <p className="login-tagline">
           Enterprise document intelligence<br />for Confluence workspaces
         </p>
+
+        {sessionExpired && (
+          <div className="login-error" style={{ borderColor: '#fbbf24', background: '#fffbeb' }}>
+            <div className="login-error-icon">⏱</div>
+            <div className="login-error-content">
+              <div className="login-error-message" style={{ color: '#92400e' }}>
+                Your session expired due to inactivity. Please log in again.
+              </div>
+            </div>
+          </div>
+        )}
 
         {accessError && (
           <div className="login-error">
