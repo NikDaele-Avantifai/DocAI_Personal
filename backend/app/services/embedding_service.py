@@ -19,14 +19,14 @@ from openai import AsyncOpenAI
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
+from app.core.config import settings, EMBEDDING_MODEL
 from app.models.page import Page, EMBEDDING_DIM
 
 log = logging.getLogger(__name__)
 
 OPENAI_MODEL   = "text-embedding-3-small"
 VOYAGE_API_URL = "https://api.voyageai.com/v1/embeddings"
-VOYAGE_MODEL   = "voyage-3"
+VOYAGE_MODEL   = EMBEDDING_MODEL
 LOCAL_MODEL    = "BAAI/bge-small-en-v1.5"   # 384 dims
 
 # Module-level cache so the model is loaded once per process

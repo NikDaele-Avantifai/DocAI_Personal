@@ -74,6 +74,29 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
+# ── Model configuration — change here, applies everywhere ─────────────────────
+# Switching a model is a one-line change, not a code search.
+
+# High-volume structured tasks — Haiku is sufficient and 10× cheaper
+ANALYSIS_MODEL: str = "claude-haiku-4-5-20251001"
+RENAME_MODEL: str = "claude-haiku-4-5-20251001"
+DUPLICATE_MODEL: str = "claude-haiku-4-5-20251001"
+SWEEP_MODEL: str = "claude-haiku-4-5-20251001"
+
+# Quality-critical tasks — Sonnet required
+PROPOSAL_MODEL: str = "claude-sonnet-4-6"
+CHAT_MODEL: str = "claude-sonnet-4-6"
+
+# Embedding model
+EMBEDDING_MODEL: str = "voyage-3"
+
+# Max tokens per task — tuned for each use case
+ANALYSIS_MAX_TOKENS: int = 1000
+PROPOSAL_MAX_TOKENS: int = 2000
+RENAME_MAX_TOKENS: int = 200
+DUPLICATE_MAX_TOKENS: int = 500
+CHAT_MAX_TOKENS: int = 1500
+
 # Warn loudly if production secrets are missing
 import logging as _logging
 _issues = settings.validate_production_secrets()

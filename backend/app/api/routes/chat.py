@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
+from app.core.config import settings, CHAT_MODEL, CHAT_MAX_TOKENS
 from app.core.auth import require_editor
 from app.core.usage import check_limit, track_usage
 from app.core.workspace import get_current_workspace
@@ -98,8 +98,8 @@ async def stream_anthropic(messages: list[dict], context_block: str) -> AsyncGen
 
     try:
         async with client.messages.stream(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1024,
+            model=CHAT_MODEL,
+            max_tokens=CHAT_MAX_TOKENS,
             system=system,
             messages=messages,
         ) as stream:

@@ -8,7 +8,7 @@ import uuid as _uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.core.config import settings
+from app.core.config import settings, ANALYSIS_MODEL, ANALYSIS_MAX_TOKENS
 from app.core.auth import require_editor
 from app.core.usage import check_limit, track_usage
 from app.db.database import get_db
@@ -580,8 +580,8 @@ async def analyze_page(
     user_message = _build_user_message(body, previous_analysis, analysis_settings, dismissed_list)
 
     message = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1536,
+        model=ANALYSIS_MODEL,
+        max_tokens=ANALYSIS_MAX_TOKENS,
         system=system_prompt,
         messages=[{"role": "user", "content": user_message}]
     )

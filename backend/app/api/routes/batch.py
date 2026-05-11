@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
+from app.core.config import settings, RENAME_MODEL, RENAME_MAX_TOKENS
 from app.core.auth import require_editor
 from app.core.usage import check_limit, track_usage
 from app.core.workspace import get_current_workspace
@@ -154,8 +154,8 @@ def _call_claude(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ], ensure_ascii=False)
 
     msg = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=4096,
+        model=RENAME_MODEL,
+        max_tokens=RENAME_MAX_TOKENS,
         system=RENAME_SYSTEM,
         messages=[{"role": "user", "content": f"Review these pages:\n{payload}"}],
     )
