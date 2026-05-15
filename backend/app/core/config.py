@@ -47,6 +47,14 @@ class Settings(BaseSettings):
     # Frontend URL override (for staging / custom deployments)
     frontend_url: str = ""
 
+    # Extra CORS origins — comma-separated list appended to the allowlist.
+    # Use this on Railway staging: CORS_ORIGINS=https://staging.avantifai.com
+    cors_origins: str = ""
+
+    @property
+    def extra_cors_origins(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
     # Admin monitoring (internal use only — not customer-facing)
     admin_secret_token: str = ""
 

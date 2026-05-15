@@ -94,13 +94,17 @@ origins_list = []
 
 if settings.is_production:
     origins_list = ["https://app.avantifai.com"]
-    # Add staging frontend if configured
     if settings.frontend_url:
         origins_list.append(settings.frontend_url)
 elif settings.frontend_url:
     origins_list = [settings.frontend_url, "http://localhost:3000", "http://localhost:5173"]
 else:
     origins_list = ["http://localhost:3000", "http://localhost:5173"]
+
+# Merge any extra origins from CORS_ORIGINS env var (comma-separated)
+for _origin in settings.extra_cors_origins:
+    if _origin not in origins_list:
+        origins_list.append(_origin)
 
 app.add_middleware(
     CORSMiddleware,
