@@ -93,7 +93,10 @@ app.add_middleware(RequestSizeLimitMiddleware, max_bytes=10 * 1024 * 1024)
 origins_list = []
 
 if settings.is_production:
-    origins_list = ["https://app.avantifai.com"]
+    origins_list = [
+        "https://app.avantifai.com",
+        "https://staging.avantifai.com",
+    ]
     if settings.frontend_url:
         origins_list.append(settings.frontend_url)
 elif settings.frontend_url:
