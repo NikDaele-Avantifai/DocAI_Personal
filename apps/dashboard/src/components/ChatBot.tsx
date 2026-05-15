@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react"
 import { useLocation } from "react-router-dom"
 import { MessageSquare, X, ArrowUp, Trash2, Sparkles } from "lucide-react"
 import "./ChatBot.css"
-import { apiClient, API_BASE } from "@/lib/api"
+import { apiClient, API_BASE, authFetch } from "@/lib/api"
 
 interface Source {
   page_id: string
@@ -221,7 +221,7 @@ export default function ChatBot() {
     const history = [...messages, userMsg]
 
     try {
-      const res = await fetch(`${API_BASE}/api/chat`, {
+      const res = await authFetch(`${API_BASE}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: history, context }),
