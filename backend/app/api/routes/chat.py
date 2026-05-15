@@ -47,6 +47,7 @@ Your primary job: answer questions about the company's internal documentation ac
 When documentation context is provided:
 - Answer using ONLY the provided documentation
 - Always cite the source page name when you reference specific information
+- Always include the space name when mentioning a page, format as: "PageTitle (SpaceName)"
 - If multiple pages are relevant, synthesise across them
 - If the answer is not in the documentation, say clearly: "I don't see that covered in your documentation."
 - Never guess or use general knowledge when the question is about company-specific information
@@ -78,7 +79,8 @@ def _build_rag_context(chunks: list[RetrievedChunk]) -> str:
 
     seen_pages: dict[str, list[str]] = {}
     for chunk in chunks:
-        key = f"{chunk.page_title} [{chunk.space_key}]"
+        display_space = chunk.space_name or chunk.space_key
+        key = f"{chunk.page_title} [{display_space}]"
         if key not in seen_pages:
             seen_pages[key] = []
         seen_pages[key].append(chunk.content)
@@ -136,6 +138,7 @@ def _extract_sources(chunks: list[RetrievedChunk]) -> list[dict]:
                 "page_id": chunk.page_id,
                 "title": chunk.page_title,
                 "space_key": chunk.space_key,
+                "space_name": chunk.space_name or chunk.space_key,
                 "url": chunk.page_url,
                 "owner": chunk.page_owner,
             })

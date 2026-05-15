@@ -20,6 +20,7 @@ class RetrievedChunk:
     page_id: str
     page_title: str
     space_key: str
+    space_name: str
     page_url: str | None
     page_owner: str | None
     last_modified: str | None
@@ -138,6 +139,7 @@ async def retrieve(
             page_id,
             page_title,
             space_key,
+            space_name,
             page_url,
             page_owner,
             last_modified,
@@ -174,6 +176,7 @@ async def retrieve(
             page_id,
             page_title,
             space_key,
+            space_name,
             page_url,
             page_owner,
             last_modified,
@@ -208,20 +211,22 @@ async def retrieve(
         return []
 
     merged = _reciprocal_rank_fusion(
-        [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8]) for r in vector_rows],
-        [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8]) for r in keyword_rows],
+        [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9]) for r in vector_rows],
+        [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9]) for r in keyword_rows],
     )
 
     results = []
     seen_page_ids: set[str] = set()
 
     for (row, score) in merged[:top_k]:
-        chunk_id, page_id, page_title, space_key, page_url, page_owner, last_modified, content, _ = row
+        chunk_id, page_id, page_title, space_key, space_name, \
+        page_url, page_owner, last_modified, content, _ = row
         results.append(RetrievedChunk(
             chunk_id=chunk_id,
             page_id=page_id,
             page_title=page_title or "Untitled",
             space_key=space_key or "",
+            space_name=space_name or space_key or "",
             page_url=page_url,
             page_owner=page_owner,
             last_modified=last_modified,
