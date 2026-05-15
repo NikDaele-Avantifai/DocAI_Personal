@@ -84,11 +84,11 @@ async def retrieve(
             page_owner,
             last_modified,
             content,
-            1 - (embedding <=> :embedding::vector) AS score
+            1 - (embedding <=> CAST(:embedding AS vector)) AS score
         FROM page_chunks
         WHERE workspace_id = :workspace_id
           AND embedding IS NOT NULL
-        ORDER BY embedding <=> :embedding::vector
+        ORDER BY embedding <=> CAST(:embedding AS vector)
         LIMIT :limit
     """)
 
@@ -101,6 +101,10 @@ async def retrieve(
     except Exception as exc:
         log.warning("retrieve: vector search failed: %s", exc)
         vector_rows = []
+        try:
+            await db.rollback()
+        except Exception:
+            pass
 
     keyword_sql = text("""
         SELECT
