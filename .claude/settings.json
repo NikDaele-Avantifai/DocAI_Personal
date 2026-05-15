@@ -3,7 +3,9 @@
     "allow": [
       "Bash(grep -rn \"useEffect\\\\|isTokenReady\\\\|fetch\\(\\\\`\\\\${API\" /Users/nikolaidaelemans/Documents/docai/apps/dashboard/src/pages/DuplicatesPage.tsx)",
       "Bash(DATABASE_URL=\"postgresql://nikolaidaelemans:postgres@localhost:5432/doc_ai_db\" python migrate.py)",
-      "Bash(DATABASE_URL=\"postgresql://nikolaidaelemans:postgres@localhost:5432/doc_ai_db\" python migrate.py --list)"
+      "Bash(DATABASE_URL=\"postgresql://nikolaidaelemans:postgres@localhost:5432/doc_ai_db\" python migrate.py --list)",
+      "Bash(grep -E \"\\\\.py$\")",
+      "Bash(node -e \"const l = require\\('/Users/nikolaidaelemans/Documents/docai/apps/dashboard/node_modules/lucide-react'\\); console.log\\(['MessageSquare','X','ArrowUp','Trash2','Sparkles'].map\\(n => n + ': ' + \\(n in l ? 'OK' : 'MISSING'\\)\\).join\\('\\\\n'\\)\\)\")"
     ]
   }
 }
