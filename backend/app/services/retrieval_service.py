@@ -1,4 +1,5 @@
 import logging
+import re
 from dataclasses import dataclass
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,6 +53,47 @@ def _reciprocal_rank_fusion(
     return [(id_to_row[cid], score) for cid, score in merged]
 
 
+def _parse_query_filters(query: str) -> dict:
+    """
+    Detect structural intent in a query and return
+    SQL filter parameters to narrow the search.
+
+    Returns dict with optional keys:
+      space_name_hint: str — partial space name to filter by
+      owner_hint: str — owner name to filter by
+      empty_only: bool — only return thin/empty pages
+    """
+    q = query.lower()
+    filters: dict = {}
+
+    space_patterns = [
+        r"in (?:the )?([a-z][a-z\s]+?) space",
+        r"([a-z][a-z\s]+?)'s space",
+        r"space[:\s]+([a-z][a-z\s]+)",
+    ]
+    for pattern in space_patterns:
+        m = re.search(pattern, q)
+        if m:
+            filters["space_name_hint"] = m.group(1).strip()
+            break
+
+    owner_patterns = [
+        r"owned by ([a-z][a-z\s]+)",
+        r"([a-z][a-z\s]+) owns",
+        r"owner[:\s]+([a-z][a-z\s]+)",
+    ]
+    for pattern in owner_patterns:
+        m = re.search(pattern, q)
+        if m:
+            filters["owner_hint"] = m.group(1).strip()
+            break
+
+    if any(w in q for w in ["empty", "blank", "thin", "no content", "incomplete"]):
+        filters["empty_only"] = True
+
+    return filters
+
+
 async def retrieve(
     query: str,
     workspace_id: str,
@@ -74,7 +116,23 @@ async def retrieve(
 
     embedding_str = "[" + ",".join(str(v) for v in query_embedding) + "]"
 
-    vector_sql = text("""
+    filters = _parse_query_filters(query)
+
+    extra_conditions = ""
+    extra_params: dict = {}
+
+    if filters.get("space_name_hint"):
+        extra_conditions += " AND LOWER(space_name) LIKE :space_name_filter"
+        extra_params["space_name_filter"] = f"%{filters['space_name_hint']}%"
+
+    if filters.get("owner_hint"):
+        extra_conditions += " AND LOWER(page_owner) LIKE :owner_filter"
+        extra_params["owner_filter"] = f"%{filters['owner_hint']}%"
+
+    if filters.get("empty_only"):
+        extra_conditions += " AND (word_count IS NULL OR word_count < 50)"
+
+    vector_sql = text(f"""
         SELECT
             id,
             page_id,
@@ -88,16 +146,20 @@ async def retrieve(
         FROM page_chunks
         WHERE workspace_id = :workspace_id
           AND embedding IS NOT NULL
+          {extra_conditions}
         ORDER BY embedding <=> CAST(:embedding AS vector)
         LIMIT :limit
     """)
 
+    vector_params = {
+        "embedding": embedding_str,
+        "workspace_id": workspace_id,
+        "limit": VECTOR_CANDIDATES,
+        **extra_params,
+    }
+
     try:
-        vector_rows = (await db.execute(vector_sql, {
-            "embedding": embedding_str,
-            "workspace_id": workspace_id,
-            "limit": VECTOR_CANDIDATES,
-        })).fetchall()
+        vector_rows = (await db.execute(vector_sql, vector_params)).fetchall()
     except Exception as exc:
         log.warning("retrieve: vector search failed: %s", exc)
         vector_rows = []
@@ -106,7 +168,7 @@ async def retrieve(
         except Exception:
             pass
 
-    keyword_sql = text("""
+    keyword_sql = text(f"""
         SELECT
             id,
             page_id,
@@ -124,16 +186,20 @@ async def retrieve(
         WHERE workspace_id = :workspace_id
           AND to_tsvector('english', content) @@
               plainto_tsquery('english', :query)
+          {extra_conditions}
         ORDER BY score DESC
         LIMIT :limit
     """)
 
+    keyword_params = {
+        "query": query,
+        "workspace_id": workspace_id,
+        "limit": KEYWORD_CANDIDATES,
+        **extra_params,
+    }
+
     try:
-        keyword_rows = (await db.execute(keyword_sql, {
-            "query": query,
-            "workspace_id": workspace_id,
-            "limit": KEYWORD_CANDIDATES,
-        })).fetchall()
+        keyword_rows = (await db.execute(keyword_sql, keyword_params)).fetchall()
     except Exception as exc:
         log.warning("retrieve: keyword search failed: %s", exc)
         keyword_rows = []

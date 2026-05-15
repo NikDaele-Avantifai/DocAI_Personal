@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import datetime
-from sqlalchemy import String, Integer, Text, DateTime, func
+from sqlalchemy import String, Integer, Boolean, Text, DateTime, func
 from sqlalchemy.orm import Mapped, mapped_column
 from pgvector.sqlalchemy import Vector
 from app.db.database import Base
@@ -20,9 +20,12 @@ class PageChunk(Base):
     )
     page_title: Mapped[str | None] = mapped_column(String, nullable=True)
     space_key: Mapped[str | None] = mapped_column(String, nullable=True)
+    space_name: Mapped[str | None] = mapped_column(String, nullable=True)
     page_url: Mapped[str | None] = mapped_column(String, nullable=True)
     page_owner: Mapped[str | None] = mapped_column(String, nullable=True)
     last_modified: Mapped[str | None] = mapped_column(String, nullable=True)
+    word_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_healthy: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

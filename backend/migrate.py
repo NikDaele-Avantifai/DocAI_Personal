@@ -183,6 +183,15 @@ MIGRATIONS = [
         ]
     ),
     (
+        '008_chunk_space_name',
+        'Add space_name to page_chunks for better retrieval',
+        [
+            "ALTER TABLE page_chunks ADD COLUMN IF NOT EXISTS space_name VARCHAR",
+            "ALTER TABLE page_chunks ADD COLUMN IF NOT EXISTS word_count INTEGER",
+            "ALTER TABLE page_chunks ADD COLUMN IF NOT EXISTS is_healthy BOOLEAN",
+        ]
+    ),
+    (
         '007_page_chunks_rag',
         'Add page_chunks table for RAG retrieval',
         [

@@ -3,7 +3,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.chunk import PageChunk
-from app.models.page import Page
+from app.models.page import Page, Space
 from app.services.embedding_service import EmbeddingService
 
 log = logging.getLogger(__name__)
@@ -63,6 +63,16 @@ async def chunk_and_embed_page(
         log.debug("chunk_and_embed_page: page %s has no content — skipping", page.id)
         return 0
 
+    # Get space display name
+    space_result = await db.execute(
+        select(Space).where(
+            Space.key == page.space_key,
+            Space.workspace_id == workspace_id,
+        )
+    )
+    space = space_result.scalar_one_or_none()
+    space_name = space.name if space else page.space_key
+
     full_text = f"{page.title}\n\n{content}" if page.title else content
     raw_chunks = _split_into_chunks(full_text)
 
@@ -88,9 +98,12 @@ async def chunk_and_embed_page(
             embedding=embedding,
             page_title=page.title,
             space_key=page.space_key,
+            space_name=space_name,
             page_url=page.url,
             page_owner=page.owner,
             last_modified=page.last_modified,
+            word_count=page.word_count,
+            is_healthy=page.is_healthy,
         )
         db.add(chunk)
         created += 1
