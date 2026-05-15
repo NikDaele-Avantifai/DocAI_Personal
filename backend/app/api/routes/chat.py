@@ -14,9 +14,13 @@ from app.core.usage import check_limit, track_usage
 from app.core.workspace import get_current_workspace
 from app.db.database import get_db
 from app.models.workspace import Workspace
+from app.services.embedding_service import EmbeddingService
+from app.services.retrieval_service import retrieve, RetrievedChunk
 
 router = APIRouter()
 log = logging.getLogger(__name__)
+
+_embedding_svc = EmbeddingService()
 
 
 class ChatMessage(BaseModel):
@@ -36,65 +40,123 @@ class ChatRequest(BaseModel):
     context: dict = {}
 
 
-SYSTEM_PROMPT = """You are DocAI Assistant — an AI built into the DocAI platform, which helps teams keep their Confluence documentation healthy.
+RAG_SYSTEM_PROMPT = """You are DocAI Assistant — an AI with direct access to this company's Confluence documentation.
 
-Your two core jobs:
-1. **Help users navigate and understand the DocAI platform** — the dashboard has: Overview (workspace health summary), Pages (browse all synced pages with health scores), Duplicate Detector (find near-identical pages), Proposals (AI-suggested actions like archiving or merging pages), Audit Log (history of applied changes), and Settings.
-2. **Answer questions about the specific Confluence page the user is currently viewing** — when page content is provided to you, use it directly to answer questions. Do not say you lack access; the content is given to you in the context block below.
+Your primary job: answer questions about the company's internal documentation accurately and helpfully.
 
-Tone: concise, direct, helpful. Use short paragraphs or bullet points. Never pad responses. If you can answer in two sentences, do so.
+When documentation context is provided:
+- Answer using ONLY the provided documentation
+- Always cite the source page name when you reference specific information
+- If multiple pages are relevant, synthesise across them
+- If the answer is not in the documentation, say clearly: "I don't see that covered in your documentation."
+- Never guess or use general knowledge when the question is about company-specific information
 
-Rules:
-- If page content is provided, answer questions about it using that content — summarise, quote, explain, compare sections, whatever the user needs.
-- If no page content is available, say so briefly and suggest the user click "Analyze This Page" in the extension to load it.
-- For navigation questions ("where do I find X?"), give the exact dashboard section name.
-- Never invent page content or workspace stats you weren't given."""
+When no documentation context is found:
+- Say the topic wasn't found in the indexed documentation
+- Suggest the user sync their Confluence workspace if they haven't recently
+- You can still answer general DocAI platform questions
+
+DocAI platform navigation:
+- Overview: workspace health score and at-risk pages
+- Pages: browse all synced Confluence pages
+- Duplicates: semantic duplicate detection
+- Proposals: AI-proposed fixes awaiting approval
+- Audit Log: history of all changes
+- Batch Rename: bulk title improvement
+- Settings → Integrations: connect Confluence
+
+Tone: concise, direct. Use bullet points for lists. Never pad responses."""
 
 
-def build_context_block(context: dict) -> str:
+def _build_rag_context(chunks: list[RetrievedChunk]) -> str:
+    """Format retrieved chunks into a context block for Claude."""
+    if not chunks:
+        return ""
+
+    parts = ["DOCUMENTATION CONTEXT (use this to answer the question):"]
+    parts.append("=" * 60)
+
+    seen_pages: dict[str, list[str]] = {}
+    for chunk in chunks:
+        key = f"{chunk.page_title} [{chunk.space_key}]"
+        if key not in seen_pages:
+            seen_pages[key] = []
+        seen_pages[key].append(chunk.content)
+
+    for page_key, contents in seen_pages.items():
+        parts.append(f"\nSource: {page_key}")
+        parts.append("-" * 40)
+        for content in contents:
+            parts.append(content)
+
+    parts.append("=" * 60)
+    return "\n".join(parts)
+
+
+def _build_dashboard_context(context: dict) -> str:
+    """Build context block from dashboard state (existing behaviour)."""
     parts = []
 
-    # Dashboard route context
     if context.get("currentRoute") and context["currentRoute"] != "extension":
         route = context["currentRoute"]
         route_names = {
-            "/overview": "Overview", "/pages": "Pages", "/duplicates": "Duplicate Detector",
-            "/proposals": "Proposals", "/audit": "Audit Log", "/batch-rename": "Batch Rename",
+            "/overview": "Overview", "/pages": "Pages",
+            "/duplicates": "Duplicate Detector", "/proposals": "Proposals",
+            "/audit": "Audit Log", "/batch-rename": "Batch Rename",
             "/settings": "Settings",
         }
-        parts.append(f"User is viewing: {route_names.get(route, route)} in the DocAI dashboard")
+        parts.append(f"User is viewing: {route_names.get(route, route)}")
 
-    # Workspace stats
     if context.get("pages"):
         parts.append(f"Total pages synced: {context['pages']}")
     if context.get("issues"):
         parts.append(f"Pending issues: {context['issues']}")
     if context.get("duplicates"):
         parts.append(f"Duplicates detected: {context['duplicates']}")
-
-    # Current Confluence page
     if context.get("pageTitle"):
-        parts.append(f"Confluence page title: {context['pageTitle']}")
-    if context.get("pageUrl"):
-        parts.append(f"Confluence page URL: {context['pageUrl']}")
-    if context.get("pageOwner"):
-        parts.append(f"Page owner: {context['pageOwner']}")
-    if context.get("pageLastModified"):
-        parts.append(f"Last modified: {context['pageLastModified']}")
+        parts.append(f"Currently viewing page: {context['pageTitle']}")
 
     if context.get("pageContent"):
-        content = context["pageContent"][:6000]  # cap to keep tokens sane
-        parts.append(f"\n--- PAGE CONTENT (use this to answer questions) ---\n{content}\n--- END PAGE CONTENT ---")
+        content = context["pageContent"][:4000]
+        parts.append(
+            f"\n--- CURRENT PAGE CONTENT ---\n{content}\n--- END ---"
+        )
 
     return "\n".join(parts)
 
 
-async def stream_anthropic(messages: list[dict], context_block: str) -> AsyncGenerator[bytes, None]:
+def _extract_sources(chunks: list[RetrievedChunk]) -> list[dict]:
+    """Deduplicated source list for the frontend to display."""
+    seen: set[str] = set()
+    sources = []
+    for chunk in chunks:
+        if chunk.page_id not in seen:
+            seen.add(chunk.page_id)
+            sources.append({
+                "page_id": chunk.page_id,
+                "title": chunk.page_title,
+                "space_key": chunk.space_key,
+                "url": chunk.page_url,
+                "owner": chunk.page_owner,
+            })
+    return sources
+
+
+async def stream_anthropic(
+    messages: list[dict],
+    rag_context: str,
+    dashboard_context: str,
+    sources: list[dict],
+) -> AsyncGenerator[bytes, None]:
     client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
-    system = SYSTEM_PROMPT
-    if context_block:
-        system += f"\n\nWorkspace context:\n{context_block}"
+    system = RAG_SYSTEM_PROMPT
+
+    if rag_context:
+        system += f"\n\n{rag_context}"
+
+    if dashboard_context:
+        system += f"\n\nDashboard state:\n{dashboard_context}"
 
     try:
         async with client.messages.stream(
@@ -103,13 +165,18 @@ async def stream_anthropic(messages: list[dict], context_block: str) -> AsyncGen
             system=system,
             messages=messages,
         ) as stream:
+            if sources:
+                sources_payload = json.dumps({"sources": sources})
+                yield f"data: {sources_payload}\n\n".encode()
+
             async for text in stream.text_stream:
                 payload = json.dumps({"delta": text})
                 yield f"data: {payload}\n\n".encode()
 
         yield b"data: [DONE]\n\n"
+
     except anthropic.AuthenticationError:
-        yield b'data: {"delta": "Authentication error - check your Anthropic API key in Settings."}\n\n'
+        yield b'data: {"delta": "Authentication error - check Anthropic API key."}\n\n'
         yield b"data: [DONE]\n\n"
     except Exception as e:
         log.error("chat stream error: %s", e)
@@ -124,11 +191,11 @@ async def chat(
     workspace: Workspace = Depends(get_current_workspace),
     user: dict = Depends(require_editor),
 ):
-    """Stream a chat response using Claude via SSE."""
+    """Stream a RAG-augmented chat response using Claude via SSE."""
     if not settings.anthropic_api_key:
         raise HTTPException(
             status_code=503,
-            detail="ANTHROPIC_API_KEY not configured. Add it to backend/.env",
+            detail="ANTHROPIC_API_KEY not configured.",
         )
 
     await check_limit(db, workspace, "chat")
@@ -142,14 +209,33 @@ async def chat(
     if not messages:
         raise HTTPException(status_code=422, detail="No messages provided")
 
-    context_block = build_context_block(body.context)
+    last_user_message = next(
+        (m["content"] for m in reversed(messages) if m["role"] == "user"),
+        ""
+    )
 
-    # Track usage before streaming — Claude call is considered made once we start
+    chunks: list[RetrievedChunk] = []
+    if last_user_message and workspace.confluence_connected:
+        try:
+            chunks = await retrieve(
+                query=last_user_message,
+                workspace_id=workspace.id,
+                embedding_svc=_embedding_svc,
+                db=db,
+            )
+        except Exception as exc:
+            log.warning("chat: RAG retrieval failed (non-fatal): %s", exc)
+            chunks = []
+
+    rag_context = _build_rag_context(chunks)
+    dashboard_context = _build_dashboard_context(body.context)
+    sources = _extract_sources(chunks)
+
     await track_usage(db, workspace, user, "chat")
     await db.commit()
 
     return StreamingResponse(
-        stream_anthropic(messages, context_block),
+        stream_anthropic(messages, rag_context, dashboard_context, sources),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

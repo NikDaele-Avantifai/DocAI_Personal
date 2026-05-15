@@ -182,6 +182,35 @@ MIGRATIONS = [
             "UPDATE workspaces SET confluence_api_token_enc = NULL, confluence_connected = FALSE WHERE confluence_api_token_enc IS NOT NULL",
         ]
     ),
+    (
+        '007_page_chunks_rag',
+        'Add page_chunks table for RAG retrieval',
+        [
+            """CREATE TABLE IF NOT EXISTS page_chunks (
+                id          SERIAL PRIMARY KEY,
+                workspace_id VARCHAR NOT NULL,
+                page_id     VARCHAR NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                content     TEXT NOT NULL,
+                embedding   VECTOR(1024),
+                page_title  VARCHAR,
+                space_key   VARCHAR,
+                page_url    VARCHAR,
+                page_owner  VARCHAR,
+                last_modified VARCHAR,
+                created_at  TIMESTAMPTZ DEFAULT NOW()
+            )""",
+            "CREATE INDEX IF NOT EXISTS ix_page_chunks_workspace_id ON page_chunks(workspace_id)",
+            "CREATE INDEX IF NOT EXISTS ix_page_chunks_page_id ON page_chunks(page_id)",
+            """CREATE INDEX IF NOT EXISTS ix_page_chunks_workspace_page
+               ON page_chunks(workspace_id, page_id)""",
+            """CREATE INDEX IF NOT EXISTS ix_page_chunks_embedding
+               ON page_chunks USING ivfflat (embedding vector_cosine_ops)
+               WITH (lists = 50)""",
+            """CREATE INDEX IF NOT EXISTS ix_page_chunks_fts
+               ON page_chunks USING gin(to_tsvector('english', content))""",
+        ]
+    ),
 ]
 
 # ── Runner ────────────────────────────────────────────────────────────────────

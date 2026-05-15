@@ -169,6 +169,23 @@ async def _background_embed(workspace_id: str) -> None:
         job_id, completed, len(page_ids), failed,
     )
 
+    # Chunk pages for RAG retrieval
+    try:
+        from app.services.chunking_service import chunk_workspace
+        async with AsyncSessionLocal() as chunk_session:
+            result = await chunk_workspace(
+                workspace_id=workspace_id,
+                embedding_svc=_embed_svc,
+                db=chunk_session,
+                force=False,
+            )
+            log.info(
+                "RAG chunking complete: %d/%d pages processed",
+                result["processed"], result["total"],
+            )
+    except Exception as exc:
+        log.error("RAG chunking failed (non-fatal): %s", exc)
+
 
 @router.post("/spaces")
 async def sync_all_spaces(

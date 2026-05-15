@@ -113,6 +113,7 @@ async def init_db() -> None:
     from app.models.usage import WorkspaceUsage, UsageEvent              # noqa: F401 — registers usage tables
     from app.models.workspace_member import WorkspaceMember, WorkspaceInvite  # noqa: F401 — registers member tables
     from app.models.job import BackgroundJob  # noqa: F401 — registers background_jobs table
+    from app.models.chunk import PageChunk  # noqa: F401
 
     # Run pending migrations before creating tables
     await run_migrations()
