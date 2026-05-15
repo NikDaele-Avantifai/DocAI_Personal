@@ -73,24 +73,40 @@ class EmbeddingService:
         return self._hash_embedding(text)
 
     async def _voyage_embed(self, text: str) -> list[float]:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                VOYAGE_API_URL,
-                headers={
-                    "Authorization": f"Bearer {settings.voyage_api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={"input": [text], "model": VOYAGE_MODEL},
-            )
-            resp.raise_for_status()
-            embedding: list[float] = resp.json()["data"][0]["embedding"]
-
-        # voyage-3 natively produces 1024 dims — guard against API changes
-        if len(embedding) > EMBEDDING_DIM:
-            embedding = embedding[:EMBEDDING_DIM]
-        elif len(embedding) < EMBEDDING_DIM:
-            embedding = embedding + [0.0] * (EMBEDDING_DIM - len(embedding))
-        return embedding
+        max_retries = 4
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.post(
+                        VOYAGE_API_URL,
+                        headers={
+                            "Authorization": f"Bearer {settings.voyage_api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={"input": [text], "model": VOYAGE_MODEL},
+                    )
+                    if resp.status_code == 429:
+                        wait = 2 ** attempt  # 1s, 2s, 4s, 8s
+                        log.warning(
+                            "Voyage 429 — waiting %ds before retry %d/%d",
+                            wait, attempt + 1, max_retries
+                        )
+                        await asyncio.sleep(wait)
+                        continue
+                    resp.raise_for_status()
+                    embedding: list[float] = resp.json()["data"][0]["embedding"]
+                    if len(embedding) > EMBEDDING_DIM:
+                        embedding = embedding[:EMBEDDING_DIM]
+                    elif len(embedding) < EMBEDDING_DIM:
+                        embedding = embedding + [0.0] * (EMBEDDING_DIM - len(embedding))
+                    return embedding
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 429 and attempt < max_retries - 1:
+                    wait = 2 ** attempt
+                    await asyncio.sleep(wait)
+                    continue
+                raise
+        raise RuntimeError("Voyage AI rate limit exceeded after retries")
 
     async def _openai_embed(self, text: str) -> list[float]:
         client = AsyncOpenAI(api_key=settings.openai_api_key)
