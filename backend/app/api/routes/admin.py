@@ -291,6 +291,25 @@ async def delete_workspace_admin(
     return {"ok": True, "deleted": workspace_id}
 
 
+@router.post("/workspaces/{workspace_id}/rechunk")
+async def rechunk_workspace(
+    workspace_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_admin),
+):
+    """Force re-chunk all pages for a workspace."""
+    from app.services.chunking_service import chunk_workspace
+    from app.services.embedding_service import EmbeddingService
+
+    result = await chunk_workspace(
+        workspace_id=workspace_id,
+        embedding_svc=EmbeddingService(),
+        db=db,
+        force=True,
+    )
+    return {"ok": True, **result}
+
+
 @router.get("/stats")
 async def admin_stats(
     db: AsyncSession = Depends(get_db),
