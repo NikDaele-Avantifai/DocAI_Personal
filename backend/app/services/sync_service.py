@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.models.page import Space, Page
 from app.services.confluence_service import ConfluenceService
+from app.services.block_anchor import anchor_html as _anchor_html
 
 log = logging.getLogger(__name__)
 
@@ -313,7 +314,14 @@ class SyncService:
         try:
             raw = await self.confluence.get_page(page_id)
             content = raw.get("body", {}).get("storage", {}).get("value", "")
-            word_count = len(content.split())
+            word_count = len(content.split())  # measured before anchoring
+            try:
+                content = _anchor_html(content).anchored_html
+            except Exception as _anc_exc:
+                log.warning(
+                    "anchor_html failed for %s: %s — serving raw content",
+                    page_id, _anc_exc,
+                )
 
             # Preserve is_folder — fetch current value before upserting
             existing_is_folder = (await self.session.execute(

@@ -3,6 +3,8 @@ from pydantic import BaseModel, Field, field_validator
 from typing import Literal, Optional
 import anthropic
 import json
+import logging
+import re
 import uuid as _uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,10 +21,14 @@ from app.models.page import Page
 from app.models.analysis_settings import AnalysisSettings, WorkspaceSettings
 from app.models.dismissed_issue import DismissedIssue
 from app.api.routes.edit import _html_to_wiki
+from app.services.block_anchor import anchor_html, AnchoredDoc, Block
 from datetime import datetime, timezone
 
 router = APIRouter()
-client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+log = logging.getLogger(__name__)
+
+# Step 5: async client — never blocks the event loop
+client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
 
 # ── Issue Taxonomy ─────────────────────────────────────────────────────────────
@@ -86,6 +92,21 @@ ISSUE_TAXONOMY: dict[str, dict] = {
     },
 }
 
+# Phase mapping: which phase each taxonomy category belongs to
+# Used for tagging issues and building phases_run
+PHASE_MAP: dict[str, str] = {
+    "unstructured":        "structure",
+    "stale":               "content",
+    "outdated_reference":  "content",
+    "duplicate":           "content",
+    "unowned":             "compliance",
+    "missing_review_date": "compliance",
+    "compliance_gap":      "compliance",
+    "broken_link":         "hygiene",
+}
+
+ALL_PHASES = ["structure", "content", "compliance", "hygiene"]
+
 
 # ── Request / Response models ─────────────────────────────────────────────────
 
@@ -112,45 +133,25 @@ class IssueLocation(BaseModel):
     line_hint: str = "full_document"
 
 
-# Keywords that indicate a fix requires information DocAI cannot access.
-_NEEDS_HUMAN_SIGNALS = [
-    "email", "e-mail",
-    "phone", "telephone",
-    "mailing address", "postal address", "physical address",
-    "contact information", "contact details", "contact email",
-    "point of contact",
-    "identify who", "identify the owner", "identify the team",
-    "identify the responsible", "identify the person",
-    "assign owner", "assign the owner", "ownership",
-    "placeholder", "example.com", "@example",
-    "tbd", "to be determined",
-    "correct url", "internal url", "internal link",
-    "data controller", "data processor",
-    "business owner", "department head", "account manager",
-]
-
-
-def _is_auto_fixable(title: str, description: str, suggestion: str) -> bool:
-    combined = f"{title} {description} {suggestion}".lower()
-    return not any(signal in combined for signal in _NEEDS_HUMAN_SIGNALS)
-
 
 class Issue(BaseModel):
-    # ── v2 fields (new schema) ────────────────────────────────────────────────
+    # ── v2 fields ─────────────────────────────────────────────────────────────
     id: str = ""
-    type: str = "general-issue"           # "text-issue" | "general-issue"
-    category: str = ""                    # internal taxonomy: stale, unowned, etc.
+    type: str = "general-issue"
+    category: str = ""
     severity: Literal["low", "medium", "high"]
     title: str
-    explanation: str = ""                 # why this is an issue (v2 name)
-    exactContent: Optional[str] = None   # verbatim text from the page
-    suggestedFix: Optional[str] = None   # exact replacement text only
-    affectedElement: Optional[str] = None  # paragraph|heading|list-item|blockquote|table-cell
-    # ── v1 backward-compat fields (populated by _validate_and_clean) ─────────
-    description: str = ""                 # = explanation
-    suggestion: Optional[str] = None      # = suggestedFix
-    location: Optional[IssueLocation] = None  # built from exactContent
-    # ── Internal flags ────────────────────────────────────────────────────────
+    explanation: str = ""
+    exactContent: Optional[str] = None
+    suggestedFix: Optional[str] = None
+    affectedElement: Optional[str] = None
+    blockId: Optional[str] = None          # Step 3: block anchor ID
+    phase: Optional[str] = None            # Step 4: structure|content|compliance|hygiene
+    # ── v1 backward-compat ────────────────────────────────────────────────────
+    description: str = ""
+    suggestion: Optional[str] = None
+    location: Optional[IssueLocation] = None
+    # ── Internal flags ─────────────────────────────────────────────────────────
     fixable: bool = True
     requires_human: bool = False
     needs_human_intervention: bool = False
@@ -171,6 +172,7 @@ class AnalyzeResponse(BaseModel):
     is_healthy: bool = False
     resolved_issues: list[ResolvedIssue] = []
     cached: bool = False
+    phases_run: list[str] = []             # Step 4: populated after analysis
 
 
 # ── System prompt builder ──────────────────────────────────────────────────────
@@ -187,7 +189,8 @@ def _build_system_prompt(analysis_settings: AnalysisSettings) -> str:
         if issue_type not in enabled:
             continue
         human_note = f" (requires human: {meta['human_reason']})" if meta.get("requires_human") else ""
-        issue_lines.append(f'- "{issue_type}": {meta["description"]}{human_note}')
+        phase = PHASE_MAP.get(issue_type, "other")
+        issue_lines.append(f'- "{issue_type}" [phase:{phase}]: {meta["description"]}{human_note}')
     issue_types_block = "\n".join(issue_lines) if issue_lines else "- No issue types currently enabled."
 
     focus_instruction = {
@@ -235,6 +238,24 @@ MINIMUM VIABLE ISSUES — only raise an issue if it would:
 Do NOT raise cosmetic, stylistic, or subjective issues.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+STEP 2 — PHASED ANALYSIS (work through all four phases IN ORDER before writing JSON):
+
+PHASE 1 — structure: headings, sections, formatting, document organisation.
+  Categories in this phase: unstructured
+
+PHASE 2 — content: staleness, outdated references, duplicates, factual currency.
+  Categories in this phase: stale, outdated_reference, duplicate
+
+PHASE 3 — compliance: owner, review date, compliance gaps.
+  Categories in this phase: unowned, missing_review_date, compliance_gap
+
+PHASE 4 — hygiene: broken/missing links, missing metadata.
+  Categories in this phase: broken_link
+
+Work through ALL enabled phases before writing your JSON response.
+Tag every issue with the phase it belongs to (see "phase" field below).
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 HARD EXCLUSIONS — NEVER raise issues about these, regardless of document type:
 
 1. Authentication header syntax in technical docs:
@@ -272,28 +293,30 @@ Severity filter: {severity_filter}
 Confidence threshold: Only report issues where your confidence is at least {confidence_threshold:.0%}.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+CONFLUENCE RENDERING ARTEFACTS — NEVER FLAG THESE AS ISSUES:
+The page content you receive has been extracted from Confluence storage-format HTML. The following patterns are normal rendering artefacts, not documentation problems:
+- Empty lines at the very start or end of a code block
+- "]]>" appearing in or near code blocks (CDATA marker from Confluence's plain-text-body elements)
+- Line numbers or numbering prefixes inside code blocks
+- Code blocks that appear to have only whitespace on line 1 or the last line
+- ']]>' or '<![CDATA[' appearing anywhere in the content — these are XML markers, not page content. Never flag them, never include them in exactContent, never reference them in any issue.
+Do NOT raise any issue whose root cause is one of the above patterns.
+
 ISSUE OBJECT FORMAT — every issue must follow this exact shape:
 {{
   "id": "<8-char unique string, e.g. first 8 chars of a uuid4>",
   "type": "text-issue",
-  "category": "<one of the categories above: stale|unowned|unstructured|outdated_reference|missing_review_date|compliance_gap|broken_link>",
+  "category": "<one of: stale|unowned|unstructured|outdated_reference|missing_review_date|compliance_gap|broken_link>",
+  "phase": "<structure|content|compliance|hygiene>",
   "severity": "high",
   "title": "Short title of the issue (max 10 words)",
   "explanation": "Why this is a problem, in 1-2 sentences. Be specific about what is wrong.",
-  "exactContent": "The exact verbatim substring from the page that has the issue — copied character-for-character, no changes",
+  "blockId": "b7",
+  "exactContent": "The exact verbatim text from that block — copied character-for-character, no changes",
   "suggestedFix": "The exact replacement text ONLY — nothing else in the document changes",
   "affectedElement": "paragraph",
   "confidence": 0.9
 }}
-
-CONFLUENCE RENDERING ARTEFACTS — NEVER FLAG THESE AS ISSUES:
-The page content you receive has been extracted from Confluence storage-format HTML. The following patterns are normal rendering artefacts, not documentation problems:
-- Empty lines at the very start or end of a code block (Confluence adds a blank line 1 and a blank trailing line around all code block content)
-- "]]>" appearing in or near code blocks (CDATA marker from Confluence's plain-text-body elements)
-- Line numbers or numbering prefixes inside code blocks (e.g. "1", "2", "3" on their own lines — these are injected by the Confluence renderer)
-- Code blocks that appear to have only whitespace on line 1 or the last line
-- ']]>' or '<![CDATA[' appearing anywhere in the content — these are XML markers from Confluence's code block storage format, not page content. Never flag them, never include them in exactContent, never reference them in any issue.
-Do NOT raise any issue whose root cause is one of the above patterns. Do NOT suggest that code examples be "properly formatted" when the only problem is an empty first/last line from Confluence rendering.
 
 RULES — follow every one:
 - The confluence page is something separate than the content and is present, do not add the page name into the content.
@@ -302,20 +325,25 @@ RULES — follow every one:
    - Use "text-issue" when the issue is tied to a specific piece of text in the page.
    - Use "general-issue" when the issue is about the document as a whole (missing owner, no review date, wrong structure, etc.).
 
-2. exactContent RULES (CRITICAL):
-   - Must be copied VERBATIM from the page content provided — not paraphrased, not summarized, not trimmed.
+2. blockId RULES (CRITICAL):
+   - Must be one of the block IDs shown in the page content above (e.g. "b0", "b3", "b12").
+   - Set blockId to the ID of the block that contains the problematic text.
+   - If type is "general-issue", set blockId to null.
+   - IMPORTANT: fabricating a blockId that was not shown in the page content will cause this issue to be silently discarded.
+
+3. exactContent RULES (CRITICAL):
+   - Must be copied VERBATIM from the TEXT of the block identified by blockId — not from any other block.
    - Copy it character-for-character, including punctuation and spacing.
    - Keep it to the minimum diagnostic phrase — the shortest substring that uniquely identifies the problem.
    - If type is "general-issue", set exactContent to null.
    - If the issue is about missing content (something that SHOULD be there but isn't), set exactContent to null and use type "general-issue".
+   - IMPORTANT: fabricating exactContent not present in the named block will cause this issue to be silently discarded.
 
-3. suggestedFix RULES (CRITICAL):
+4. suggestedFix RULES (CRITICAL):
    - Must contain ONLY the replacement for exactContent — nothing else.
-   - If the issue is "Last Updated: August 2023" being outdated, suggestedFix is "Last Updated: April 2026" — not the full sentence, not the paragraph.
-   - If the issue is a placeholder word like "test", suggestedFix is the corrected word — nothing else.
-   - Set suggestedFix to null when: (a) type is "general-issue", OR (b) the correct fix requires information DocAI does not have (correct email address, correct person name, correct internal URL, etc.).
+   - Set suggestedFix to null when: (a) type is "general-issue", OR (b) the correct fix requires information DocAI does not have.
 
-4. affectedElement: classify which HTML element type contains the issue:
+5. affectedElement: classify which HTML element type contains the issue:
    - "paragraph": inside a <p> block
    - "heading": inside an <h1>–<h6> element
    - "list-item": inside a <li> element
@@ -323,7 +351,7 @@ RULES — follow every one:
    - "table-cell": inside a <td> or <th>
    - null: if type is "general-issue"
 
-5. SURGICAL PRECISION:
+6. SURGICAL PRECISION:
    - Never propose adding new sections, restructuring content, or changing anything outside exactContent.
    - One issue = one specific problem = one minimum fix.
 
@@ -359,9 +387,18 @@ Return between 0 and {max_issues} issues. If the page is healthy, return empty i
 
 # ── Prompt builder ────────────────────────────────────────────────────────────
 
+def _render_blocks(doc: AnchoredDoc) -> str:
+    """Render anchored blocks as [bN] (tag) text lines for the model prompt."""
+    return "\n".join(
+        f"[{b.id}] ({b.element_type}) {b.text}"
+        for b in doc.blocks
+    )
+
+
 def _build_user_message(
     body: AnalyzeRequest,
     previous_analysis: PageAnalysis | None,
+    doc: AnchoredDoc,
     analysis_settings: AnalysisSettings | None = None,
     dismissed: list[dict] | None = None,
 ) -> str:
@@ -381,9 +418,16 @@ def _build_user_message(
     if body.page_version:
         page_info += f"\nCurrent Version: v{body.page_version}"
 
-    if body.content:
-        plain_content = _html_to_wiki(body.content)
-        page_info += f"\n\nPage Content:\n{plain_content}"
+    if doc.blocks:
+        # Step 3: show the model block-anchored text so it can cite exact blockIds
+        rendered = _render_blocks(doc)
+        page_info += (
+            f"\n\nPage Content (each line is [block_id] (element_type) text — "
+            f"use these block IDs in your issues):\n{rendered}"
+        )
+    elif body.content:
+        # Fallback for content that produced no addressable blocks (e.g. all code)
+        page_info += f"\n\nPage Content:\n{_html_to_wiki(body.content)}"
     else:
         page_info += "\n\nNote: No page content was available. Analyze based on metadata only."
 
@@ -438,7 +482,16 @@ Instructions:
 
 # ── Validate and clean parsed Claude output ───────────────────────────────────
 
-def _validate_and_clean(raw: dict, analysis_settings: AnalysisSettings) -> dict:
+def _norm(text: str) -> str:
+    """Normalize whitespace for substring matching."""
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
+def _validate_and_clean(
+    raw: dict,
+    analysis_settings: AnalysisSettings,
+    block_map: dict[str, Block] | None = None,
+) -> dict:
     severity_rank = {"low": 0, "medium": 1, "high": 2}
     min_rank = severity_rank.get(analysis_settings.min_severity, 0)
     enabled = set(analysis_settings.enabled_issue_types)
@@ -457,6 +510,25 @@ def _validate_and_clean(raw: dict, analysis_settings: AnalysisSettings) -> dict:
         if confidence < analysis_settings.confidence_threshold:
             continue
 
+        # ── Step 3: block-anchor validation gate ──────────────────────────────
+        if block_map:
+            bid = issue.get("blockId") or ""
+            if bid:
+                if bid not in block_map:
+                    log.warning(
+                        "dropped_unknown_block: issue '%s' cited blockId='%s' not in document",
+                        issue.get("title"), bid,
+                    )
+                    continue
+                if issue.get("type") == "text-issue" and issue.get("exactContent"):
+                    block_text = block_map[bid].text
+                    if _norm(issue["exactContent"]) not in _norm(block_text):
+                        log.warning(
+                            "dropped_unverified_quote: issue '%s' exactContent not found in block %s",
+                            issue.get("title"), bid,
+                        )
+                        continue
+
         if not issue.get("id"):
             issue["id"] = str(_uuid.uuid4())[:8]
 
@@ -472,16 +544,27 @@ def _validate_and_clean(raw: dict, analysis_settings: AnalysisSettings) -> dict:
             taxonomy_entry.get("human_reason") or "Manual review required"
         ) if needs_human else None
 
+        # ── v1 compat fields ──────────────────────────────────────────────────
         if not issue.get("description"):
             issue["description"] = issue.get("explanation", issue.get("title", ""))
         if not issue.get("suggestion"):
             issue["suggestion"] = issue.get("suggestedFix")
-        if not issue.get("location") and issue.get("exactContent"):
-            issue["location"] = {
-                "section": "document",
-                "quote": issue["exactContent"],
-                "line_hint": "middle",
-            }
+
+        # Build location from blockId when present (precise), else from exactContent
+        if not issue.get("location"):
+            bid = issue.get("blockId") or ""
+            if bid and block_map and bid in block_map:
+                issue["location"] = {
+                    "section": f"block:{bid}",
+                    "quote": issue.get("exactContent"),
+                    "line_hint": block_map[bid].element_type,
+                }
+            elif issue.get("exactContent"):
+                issue["location"] = {
+                    "section": "document",
+                    "quote": issue["exactContent"],
+                    "line_hint": "middle",
+                }
 
         cleaned_issues.append(issue)
 
@@ -502,7 +585,7 @@ async def analyze_page(
 ):
     wid = workspace.id
 
-    # ── Load analysis settings from DB ────────────────────────────────────────
+    # ── Load analysis settings ────────────────────────────────────────────────
     analysis_settings: AnalysisSettings
     try:
         settings_result = await db.execute(
@@ -516,6 +599,18 @@ async def analyze_page(
             analysis_settings = AnalysisSettings()
     except Exception:
         analysis_settings = AnalysisSettings()
+
+    # ── Anchor content (idempotent — content is already anchored from Step 2) ─
+    doc = anchor_html(body.content or "")
+
+    # ── Derive phases_run from enabled categories ─────────────────────────────
+    phases_run = sorted({
+        PHASE_MAP[cat]
+        for cat in analysis_settings.enabled_issue_types
+        if cat in PHASE_MAP
+    })
+    if not phases_run:
+        phases_run = ALL_PHASES
 
     # ── Cache lookup ──────────────────────────────────────────────────────────
     if body.page_id and body.page_version is not None and not force_refresh:
@@ -540,10 +635,11 @@ async def analyze_page(
                 summary=cached_row.summary or f"Analysis complete. Found {len(issues)} issue(s).",
                 is_healthy=cached_row.is_healthy,
                 resolved_issues=resolved,
+                phases_run=phases_run,
                 cached=True,
             )
 
-    # ── Fetch previous analysis for fix-awareness context ────────────────────
+    # ── Previous analysis for fix-awareness ───────────────────────────────────
     previous_analysis: PageAnalysis | None = None
     if body.page_id and body.page_version is not None:
         prev_result = await db.execute(
@@ -558,7 +654,7 @@ async def analyze_page(
         )
         previous_analysis = prev_result.scalar_one_or_none()
 
-    # ── Load dismissed issues for this page ───────────────────────────────────
+    # ── Dismissed issues ──────────────────────────────────────────────────────
     dismissed_list: list[dict] = []
     if body.page_id:
         dismissed_result = await db.execute(
@@ -575,36 +671,81 @@ async def analyze_page(
     # ── Usage gate ────────────────────────────────────────────────────────────
     await check_limit(db, workspace, "analysis")
 
-    # ── Claude call ───────────────────────────────────────────────────────────
+    # ── Claude call (Step 5: async + retry) ───────────────────────────────────
     system_prompt = _build_system_prompt(analysis_settings)
-    user_message = _build_user_message(body, previous_analysis, analysis_settings, dismissed_list)
+    user_message = _build_user_message(body, previous_analysis, doc, analysis_settings, dismissed_list)
 
-    message = client.messages.create(
+    messages = [{"role": "user", "content": user_message}]
+
+    # Step 5: async call, extract text by type check (not by index)
+    message = await client.messages.create(
         model=ANALYSIS_MODEL,
         max_tokens=ANALYSIS_MAX_TOKENS,
         system=system_prompt,
-        messages=[{"role": "user", "content": user_message}]
+        messages=messages,
     )
 
-    raw = message.content[0].text.strip()
+    raw_text = next(
+        (block.text for block in message.content if block.type == "text"),
+        "",
+    ).strip()
 
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    raw = raw.strip()
+    if raw_text.startswith("```"):
+        raw_text = raw_text.split("```")[1]
+        if raw_text.startswith("json"):
+            raw_text = raw_text[4:]
+    raw_text = raw_text.strip()
 
-    parsed = json.loads(raw)
-    parsed = _validate_and_clean(parsed, analysis_settings)
+    # Step 5: retry once on parse failure, don't charge for the retry
+    try:
+        parsed = json.loads(raw_text)
+    except json.JSONDecodeError:
+        retry_message = await client.messages.create(
+            model=ANALYSIS_MODEL,
+            max_tokens=ANALYSIS_MAX_TOKENS,
+            system=system_prompt,
+            messages=[
+                *messages,
+                {"role": "assistant", "content": raw_text},
+                {"role": "user", "content": "Return valid JSON only, no prose, no markdown fences."},
+            ],
+        )
+        retry_text = next(
+            (block.text for block in retry_message.content if block.type == "text"),
+            "",
+        ).strip()
+        if retry_text.startswith("```"):
+            retry_text = retry_text.split("```")[1]
+            if retry_text.startswith("json"):
+                retry_text = retry_text[4:]
+        retry_text = retry_text.strip()
 
-    # ── Track usage after successful Claude call ──────────────────────────────
+        try:
+            parsed = json.loads(retry_text)
+        except json.JSONDecodeError:
+            # Both attempts failed — return inconclusive without charging usage
+            return AnalyzeResponse(
+                page_title=body.title or "Untitled Page",
+                page_url=body.url,
+                issues=[],
+                summary="Analysis was inconclusive — the model returned malformed JSON. Please try again.",
+                is_healthy=False,
+                resolved_issues=[],
+                phases_run=phases_run,
+                cached=False,
+            )
+
+    # Step 3: pass block_map to validation gate
+    parsed = _validate_and_clean(parsed, analysis_settings, doc.block_map)
+
+    # ── Track usage after successful parse ────────────────────────────────────
     await track_usage(db, workspace, user, "analysis", meta=body.page_id)
 
     issues = [Issue(**raw_issue) for raw_issue in parsed.get("issues", [])]
     resolved = [ResolvedIssue(**r) for r in parsed.get("resolved_issues", [])]
     summary = parsed.get("summary", f"Analysis complete. Found {len(issues)} issue(s).")
 
-    high_or_medium = [i for i in issues if i.severity in ('high', 'medium')]
+    high_or_medium = [i for i in issues if i.severity in ("high", "medium")]
     is_healthy = bool(parsed.get("is_healthy", False)) and len(high_or_medium) == 0
 
     # ── Store in cache ────────────────────────────────────────────────────────
@@ -638,6 +779,7 @@ async def analyze_page(
         summary=summary,
         is_healthy=is_healthy,
         resolved_issues=resolved,
+        phases_run=phases_run,
         cached=False,
     )
 

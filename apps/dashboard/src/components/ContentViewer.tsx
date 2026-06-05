@@ -27,6 +27,8 @@ export type Issue = {
   exactContent?: string | null
   suggestedFix?: string | null
   affectedElement?: string | null
+  blockId?: string | null
+  phase?: string | null
   // v1 backward-compat
   severity: "low" | "medium" | "high"
   title: string
@@ -70,8 +72,9 @@ type ConnectorLine = {
 }
 
 type MarkTarget = {
-  key: string   // issueKey
-  text: string  // exactContent
+  key: string      // issueKey
+  text: string     // exactContent
+  blockId?: string // if set, only match within this specific block
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -120,11 +123,15 @@ function splitAndMark(
   marks: MarkTarget[],
   refCb: (key: string, el: HTMLElement | null) => void,
   prefix: string,
+  currentBlockId?: string,
 ): ReactNode[] {
   type Span = { start: number; end: number; k: string }
   const spans: Span[] = []
 
-  for (const m of marks) {
+  // Only apply marks that have no block scope, or whose scope matches the current block
+  const applicable = marks.filter(m => !m.blockId || m.blockId === currentBlockId)
+
+  for (const m of applicable) {
     if (!m.text) continue
     // Exact match first, then NBSP-normalised fallback
     let idx = text.indexOf(m.text)
@@ -183,6 +190,7 @@ function domToReact(
   marks: MarkTarget[],
   refCb: (key: string, el: HTMLElement | null) => void,
   c: { n: number },
+  currentBlockId?: string,
 ): ReactNode {
   const k = `${c.n++}`
 
@@ -190,7 +198,7 @@ function domToReact(
   if (node.nodeType === Node.TEXT_NODE) {
     const text = node.textContent ?? ""
     if (!text) return null
-    const parts = splitAndMark(text, marks, refCb, k)
+    const parts = splitAndMark(text, marks, refCb, k, currentBlockId)
     if (parts.length === 1 && typeof parts[0] === "string") return text
     return <Fragment key={k}>{parts}</Fragment>
   }
@@ -203,27 +211,37 @@ function domToReact(
   // Skip non-content elements entirely
   if (["script", "style", "head", "colgroup", "col"].includes(tag)) return null
 
+  // If this element carries a data-block-id, it becomes the active block context
+  // for its children so that mark scoping works correctly.
+  const elBlockId = el.getAttribute("data-block-id") ?? undefined
+  const effectiveBlockId = elBlockId ?? currentBlockId
+
   const ch = Array.from(el.childNodes)
-    .map(n => domToReact(n, marks, refCb, c))
+    .map(n => domToReact(n, marks, refCb, c, effectiveBlockId))
     .filter((n): n is ReactNode => n != null)
+
+  // Helper: include data-block-id on rendered element so the DOM attr exists
+  // for downstream querySelector lookups. Frontend NEVER assigns IDs — only propagates.
+  const bid = (props: Record<string, string>) =>
+    elBlockId ? { ...props, "data-block-id": elBlockId } : props
 
   switch (tag) {
     // ── Headings ─────────────────────────────────────────────────────────
-    case "h1": return <h1 key={k} className="cv-h1">{ch}</h1>
-    case "h2": return <h2 key={k} className="cv-h2">{ch}</h2>
-    case "h3": return <h3 key={k} className="cv-h3">{ch}</h3>
-    case "h4": return <h4 key={k} className="cv-h4">{ch}</h4>
-    case "h5": return <h5 key={k} className="cv-h5">{ch}</h5>
-    case "h6": return <h6 key={k} className="cv-h6">{ch}</h6>
+    case "h1": return <h1 key={k} {...bid({ className: "cv-h1" })}>{ch}</h1>
+    case "h2": return <h2 key={k} {...bid({ className: "cv-h2" })}>{ch}</h2>
+    case "h3": return <h3 key={k} {...bid({ className: "cv-h3" })}>{ch}</h3>
+    case "h4": return <h4 key={k} {...bid({ className: "cv-h4" })}>{ch}</h4>
+    case "h5": return <h5 key={k} {...bid({ className: "cv-h5" })}>{ch}</h5>
+    case "h6": return <h6 key={k} {...bid({ className: "cv-h6" })}>{ch}</h6>
 
     // ── Block text ────────────────────────────────────────────────────────
-    case "p":          return <p          key={k} className="cv-p">{ch}</p>
-    case "blockquote": return <blockquote key={k} className="cv-blockquote">{ch}</blockquote>
+    case "p":          return <p          key={k} {...bid({ className: "cv-p" })}>{ch}</p>
+    case "blockquote": return <blockquote key={k} {...bid({ className: "cv-blockquote" })}>{ch}</blockquote>
 
     // ── Lists ─────────────────────────────────────────────────────────────
     case "ul": return <ul key={k} className="cv-ul">{ch}</ul>
     case "ol": return <ol key={k} className="cv-ol">{ch}</ol>
-    case "li": return <li key={k} className="cv-li">{ch}</li>
+    case "li": return <li key={k} {...bid({ className: "cv-li" })}>{ch}</li>
 
     // ── Inline formatting ─────────────────────────────────────────────────
     case "strong": case "b":             return <strong key={k}>{ch}</strong>
@@ -277,8 +295,8 @@ function domToReact(
     case "tbody": return <tbody key={k}>{ch}</tbody>
     case "tfoot": return <tfoot key={k}>{ch}</tfoot>
     case "tr":    return <tr    key={k}>{ch}</tr>
-    case "th":    return <th    key={k} className="cv-th">{ch}</th>
-    case "td":    return <td    key={k} className="cv-td">{ch}</td>
+    case "th":    return <th    key={k} {...bid({ className: "cv-th" })}>{ch}</th>
+    case "td":    return <td    key={k} {...bid({ className: "cv-td" })}>{ch}</td>
 
     // ── Misc ──────────────────────────────────────────────────────────────
     case "br":  return <br key={k} />
@@ -423,6 +441,19 @@ function ConnectorSvg({ lines, height }: { lines: ConnectorLine[]; height: numbe
   )
 }
 
+// ── Phase grouping ─────────────────────────────────────────────────────────
+
+const PHASE_ORDER = ["structure", "content", "compliance", "hygiene", "other"] as const
+type PhaseKey = typeof PHASE_ORDER[number]
+
+const PHASE_LABELS: Record<PhaseKey, string> = {
+  structure:  "Structure",
+  content:    "Content",
+  compliance: "Compliance",
+  hygiene:    "Hygiene",
+  other:      "Other",
+}
+
 // ── Main component ─────────────────────────────────────────────────────────
 
 export interface ContentViewerProps {
@@ -464,7 +495,11 @@ export default function ContentViewer({
   const marks = useMemo<MarkTarget[]>(() => {
     return issues
       .filter(i => i.type !== "general-issue" && !!issueQuote(i))
-      .map(i => ({ key: issueKey(i), text: issueQuote(i)! }))
+      .map(i => ({
+        key: issueKey(i),
+        text: issueQuote(i)!,
+        blockId: i.blockId ?? undefined,  // scoped mark — only highlights within this block
+      }))
   }, [issues])
 
   const renderedContent = useMemo(
@@ -765,28 +800,49 @@ export default function ContentViewer({
           {renderedContent}
         </div>
 
-        {/* Right: annotation cards (absolutely positioned) */}
+        {/* Right: annotation cards grouped by phase (absolutely positioned) */}
         <div className="cv-right-panel">
           <div className="cv-right-header">Issues</div>
           <div className="cv-right" ref={rightColRef}>
-            {annotations.map(({ key: k, issue }) => (
-              <AnnotationCard
-                key={k}
-                issue={issue}
-                created={createdProposals.has(k)}
-                proposing={proposingKey === k}
-                active={activeKey === k}
-                dismissed={dismissedKeys.has(k)}
-                dismissing={dismissingKey === k}
-                cardRef={el => {
-                  if (el) cardRefs.current.set(k, el)
-                  else    cardRefs.current.delete(k)
-                }}
-                onClick={() => setActiveKey(k === activeKey ? null : k)}
-                onPropose={e => { e.stopPropagation(); handlePropose(issue) }}
-                onDismiss={e => { e.stopPropagation(); handleDismiss(issue) }}
-              />
-            ))}
+            {(() => {
+              // Group annotations by phase; unknown phases fall into "other"
+              const groups = new Map<PhaseKey, typeof annotations>()
+              for (const phase of PHASE_ORDER) groups.set(phase, [])
+              for (const ann of annotations) {
+                const p = (ann.issue.phase ?? "other") as PhaseKey
+                const key: PhaseKey = PHASE_ORDER.includes(p) ? p : "other"
+                groups.get(key)!.push(ann)
+              }
+
+              return PHASE_ORDER.flatMap(phase => {
+                const group = groups.get(phase)!
+                if (group.length === 0) return []
+                return [
+                  <div key={`ph-${phase}`} className="cv-phase-header">
+                    <span className="cv-phase-label">{PHASE_LABELS[phase]}</span>
+                    <span className="cv-phase-count">{group.length}</span>
+                  </div>,
+                  ...group.map(({ key: k, issue }) => (
+                    <AnnotationCard
+                      key={k}
+                      issue={issue}
+                      created={createdProposals.has(k)}
+                      proposing={proposingKey === k}
+                      active={activeKey === k}
+                      dismissed={dismissedKeys.has(k)}
+                      dismissing={dismissingKey === k}
+                      cardRef={el => {
+                        if (el) cardRefs.current.set(k, el)
+                        else    cardRefs.current.delete(k)
+                      }}
+                      onClick={() => setActiveKey(k === activeKey ? null : k)}
+                      onPropose={e => { e.stopPropagation(); handlePropose(issue) }}
+                      onDismiss={e => { e.stopPropagation(); handleDismiss(issue) }}
+                    />
+                  )),
+                ]
+              })
+            })()}
           </div>
         </div>
 

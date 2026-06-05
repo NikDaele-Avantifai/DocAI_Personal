@@ -4,10 +4,15 @@ from typing import Literal
 import anthropic
 import json
 import difflib
-import uuid
 import re
+import uuid
 import html as html_module
 from datetime import datetime
+
+from lxml import etree
+from lxml import html as lhtml
+
+from app.services.block_anchor import anchor_html, strip_block_ids, _BLOCK_ID_ATTR
 
 from app.core.config import settings
 from app.core.workspace import get_current_workspace
@@ -32,6 +37,8 @@ class GenerateEditRequest(BaseModel):
     issue_suggestion: str | None = Field(None, max_length=50000)
     # v2: exact verbatim text that has the issue (from exactContent field)
     issue_exact_content: str | None = Field(None, max_length=50000)
+    # v2: block anchor ID (from blockId field) — used for precise storage-HTML replacement
+    issue_block_id: str | None = Field(None, max_length=100)
 
     @field_validator("page_id", "page_title", mode="before")
     @classmethod
@@ -238,6 +245,96 @@ def _html_to_wiki(text: str) -> str:
     return text.strip()
 
 
+def _replace_in_element(el: etree._Element, search: str, replacement: str) -> bool:
+    """
+    Replace the first occurrence of `search` within the text nodes of `el`.
+
+    Tries in order:
+      1. Exact match in el.text / child text nodes / tails (recursive).
+      2. NBSP-normalized match (\\u00a0 → space).
+      3. Whitespace-normalized fallback against the full text_content(), which
+         clears inline formatting of the block as a last resort.
+
+    Returns True if any replacement was made.
+    """
+    def _try(s: str) -> tuple[str, bool]:
+        if search in s:
+            return s.replace(search, replacement, 1), True
+        normed_s = s.replace(" ", " ")
+        normed_q = search.replace(" ", " ")
+        if normed_q in normed_s:
+            return normed_s.replace(normed_q, replacement, 1), True
+        return s, False
+
+    # el.text (text before first child)
+    if el.text:
+        new_text, ok = _try(el.text)
+        if ok:
+            el.text = new_text
+            return True
+
+    # Children recursively, plus each child's .tail (text after closing tag)
+    for child in el:
+        if child.text:
+            new_text, ok = _try(child.text)
+            if ok:
+                child.text = new_text
+                return True
+        if _replace_in_element(child, search, replacement):
+            return True
+        if child.tail:
+            new_tail, ok = _try(child.tail)
+            if ok:
+                child.tail = new_tail
+                return True
+
+    # Whitespace-normalized fallback — loses inline formatting but never silently no-ops
+    import re as _re
+    full = el.text_content()
+    norm_full = _re.sub(r"\s+", " ", full).strip()
+    norm_search = _re.sub(r"\s+", " ", search).strip()
+    if norm_search in norm_full:
+        for child in list(el):
+            el.remove(child)
+        el.text = norm_full.replace(norm_search, replacement, 1)
+        return True
+
+    return False
+
+
+def _apply_block_replacement(
+    storage_html: str,
+    block_id: str,
+    exact: str,
+    replacement: str,
+) -> tuple[str, bool]:
+    """
+    Locate `block_id` in the anchored storage HTML, replace `exact` within that
+    element's text nodes, strip all data-block-id attrs, and return the modified
+    storage HTML.
+
+    Returns (modified_html, success).  On failure returns (original_html, False).
+    """
+    try:
+        doc = anchor_html(storage_html)
+        root = lhtml.fragment_fromstring(doc.anchored_html, create_parent="div")
+        els = root.xpath(f'//*[@{_BLOCK_ID_ATTR}="{block_id}"]')
+        if not els:
+            return storage_html, False
+
+        replaced = _replace_in_element(els[0], exact, replacement)
+        if not replaced:
+            return storage_html, False
+
+        strip_block_ids(root)
+        parts = [root.text or ""]
+        for child in root:
+            parts.append(lhtml.tostring(child, encoding="unicode", method="html"))
+        return "".join(parts), True
+    except Exception:
+        return storage_html, False
+
+
 def _generate_diff_lines(old_content: str, new_content: str) -> list[dict]:
     old_lines = _html_to_wiki(old_content).splitlines()
     new_lines = new_content.splitlines()
@@ -315,19 +412,36 @@ async def generate_edit(
     if use_snippet_mode:
         replacement: str = parsed.get("replacement", "")
         is_deletion = replacement.strip() == ""
-        wiki_content = _html_to_wiki(body.content)
         exact = body.issue_exact_content or ""
-        if exact and exact in wiki_content:
-            new_content = wiki_content.replace(exact, replacement, 1)
-        else:
-            stripped_exact = exact.strip()
-            stripped_wiki = wiki_content
-            if stripped_exact and stripped_exact in stripped_wiki:
-                new_content = stripped_wiki.replace(stripped_exact, replacement, 1)
+
+        if body.issue_block_id and exact:
+            # ── Block-anchored path (v2) ───────────────────────────────────
+            # exactContent was validated against the block's normalized plain
+            # text, NOT the wiki representation.  Operate on storage HTML
+            # directly so the surfaces match, then convert to wiki for the
+            # proposal output.
+            modified_html, block_replaced = _apply_block_replacement(
+                body.content, body.issue_block_id, exact, replacement
+            )
+            if block_replaced:
+                new_content = _html_to_wiki(modified_html)
             else:
-                new_content = wiki_content
+                new_content = _html_to_wiki(body.content)
                 is_deletion = False
-                rationale = f"[Snippet not found in page — no change applied] {rationale}"
+                rationale = f"[Snippet not found in block {body.issue_block_id} — no change applied] {rationale}"
+        else:
+            # ── Legacy wiki-text path (v1 / no blockId) ───────────────────
+            wiki_content = _html_to_wiki(body.content)
+            if exact and exact in wiki_content:
+                new_content = wiki_content.replace(exact, replacement, 1)
+            else:
+                stripped_exact = exact.strip()
+                if stripped_exact and stripped_exact in wiki_content:
+                    new_content = wiki_content.replace(stripped_exact, replacement, 1)
+                else:
+                    new_content = wiki_content
+                    is_deletion = False
+                    rationale = f"[Snippet not found in page — no change applied] {rationale}"
     else:
         raw_new_content: str = parsed.get("new_content", "")
         is_deletion = raw_new_content.strip().lower() == "delete"

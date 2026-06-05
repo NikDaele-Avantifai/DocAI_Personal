@@ -21,6 +21,7 @@ type AnalysisResult = {
   resolved_issues: ResolvedIssue[]
   cached?: boolean
   issues: ContentIssue[]
+  phases_run?: string[]
 }
 
 const SEV = {
@@ -185,6 +186,7 @@ export default function PagesPage() {
       issue_description:   issue.explanation ?? issue.description ?? "",
       issue_suggestion:    issue.suggestedFix ?? issue.suggestion,
       issue_exact_content: issue.exactContent ?? undefined,
+      issue_block_id:      issue.blockId ?? undefined,
     })
   }
 
@@ -478,7 +480,9 @@ export default function PagesPage() {
                 <div className="detail-analyzing-state">
                   <span className="spinner-lg" />
                   <div className="detail-analyzing-label">Analyzing with DocAI…</div>
-                  <div className="detail-analyzing-sub">Reading page content and checking for issues</div>
+                  <div className="detail-analyzing-sub">
+                    Structure · Content · Compliance · Hygiene
+                  </div>
                 </div>
 
               ) : analysis ? (
