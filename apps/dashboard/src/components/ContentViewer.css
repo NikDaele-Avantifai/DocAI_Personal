@@ -136,6 +136,7 @@
   top: 0;
   left: 0;
   width: 100%;
+  height: 100%;
   pointer-events: none;
   overflow: visible;
   z-index: 0;
@@ -244,23 +245,19 @@ mark.cv-mark-amber {
 
 .cv-right {
   flex: 1;
-  position: relative;
-  /* min-height set in JS to match left column height */
+  padding-bottom: 12px;
 }
 
-/* ── Annotation card — margin-annotation style ──────────── */
+/* ── Annotation card — normal-flow (Option B) ───────────── */
 
 .cv-card {
-  position: absolute;
-  left: 10px;
-  width: calc(100% - 18px);
+  margin: 6px 8px;
   border: 0.5px solid var(--border);
   border-radius: var(--radius-md);
   overflow: hidden;
   background: var(--surface-2);
   cursor: pointer;
   transition: box-shadow 0.15s, border-color 0.15s, background 0.15s;
-  z-index: 1;
 }
 .cv-card:hover,
 .cv-card-active {

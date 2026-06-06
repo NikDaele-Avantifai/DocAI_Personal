@@ -77,7 +77,16 @@ type MarkTarget = {
   blockId?: string // if set, only match within this specific block
 }
 
+// Pre-resolved per-text-node spans produced by block-level matching.
+// Key is a DOM Text node from the DOMParser tree; value is the list of
+// mark spans (character offsets within that node) to highlight.
+type BlockSpans = Map<Text, Array<{ start: number; end: number; k: string }>>
+
 // ── Constants ──────────────────────────────────────────────────────────────
+
+// Mirrors the backend's ADDRESSABLE_TAGS — block elements that form natural
+// matching units when the content has no data-block-id attributes.
+const BLOCK_TAGS = new Set(["p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "blockquote", "td", "th"])
 
 const SEV_COLOR: Record<string, string> = {
   high:   "#C0392B",
@@ -250,6 +259,120 @@ function isLineNumberSpan(el: Element): boolean {
 }
 
 /**
+ * For a block element, collect every descendant Text node in document order,
+ * join their text, run the 3-strategy match for each applicable mark, then
+ * map matched [start,end] ranges back to per-Text-node offsets.
+ *
+ * Returns a BlockSpans map so domToReact can highlight across node boundaries
+ * (e.g. a sentence that spans a <strong> tag).
+ */
+function resolveBlockMarks(
+  el: Element,
+  applicable: MarkTarget[],
+): BlockSpans {
+  if (applicable.length === 0) return new Map()
+
+  // Collect all descendant text nodes in document order
+  const textNodes: Text[] = []
+  const offsets: number[] = []
+  let totalLen = 0
+  const walker = el.ownerDocument!.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+  let n: Node | null = walker.nextNode()
+  while (n) {
+    offsets.push(totalLen)
+    totalLen += (n as Text).data.length
+    textNodes.push(n as Text)
+    n = walker.nextNode()
+  }
+  if (textNodes.length === 0) return new Map()
+
+  const fullText = textNodes.map(t => t.data).join("")
+  const result: BlockSpans = new Map()
+
+  for (const m of applicable) {
+    if (!m.text) continue
+
+    let mStart = -1
+    let mEnd   = -1
+
+    // Strategy 1: exact
+    const exact = fullText.indexOf(m.text)
+    if (exact !== -1) { mStart = exact; mEnd = exact + m.text.length }
+
+    // Strategy 2: NBSP-normalised
+    if (mStart === -1) {
+      const norm = (s: string) => s.replace(/ /g, " ")
+      const ni = norm(fullText).indexOf(norm(m.text))
+      if (ni !== -1) { mStart = ni; mEnd = ni + m.text.length }
+    }
+
+    // Strategy 3: whitespace-collapsed
+    if (mStart === -1) {
+      const { collapsed, map } = collapseWs(fullText)
+      const needle = m.text.replace(/\s+/g, " ")
+      const ci = collapsed.indexOf(needle)
+      if (ci !== -1) {
+        mStart = map[ci]
+        const ce = ci + needle.length
+        mEnd = ce < map.length ? map[ce] : fullText.length
+      }
+    }
+
+    if (mStart === -1) {
+      console.warn("[ContentViewer] No match in block for:", JSON.stringify(m.text.slice(0, 80)))
+      continue
+    }
+
+    // Distribute the match range across whichever text nodes it overlaps
+    for (let i = 0; i < textNodes.length; i++) {
+      const nStart = offsets[i]
+      const nEnd   = nStart + textNodes[i].data.length
+      const oStart = Math.max(mStart, nStart)
+      const oEnd   = Math.min(mEnd,   nEnd)
+      if (oStart < oEnd) {
+        const existing = result.get(textNodes[i]) ?? []
+        existing.push({ start: oStart - nStart, end: oEnd - nStart, k: m.key })
+        result.set(textNodes[i], existing)
+      }
+    }
+  }
+
+  return result
+}
+
+/**
+ * Apply pre-resolved BlockSpans to a single text node's string.
+ * Like splitAndMark but skips the matching step — spans are already computed.
+ */
+function applySpans(
+  text: string,
+  spans: Array<{ start: number; end: number; k: string }>,
+  refCb: (key: string, el: HTMLElement | null) => void,
+  prefix: string,
+): ReactNode[] {
+  if (spans.length === 0) return [text]
+  const sorted = [...spans].sort((a, b) => a.start - b.start)
+  const nodes: ReactNode[] = []
+  let pos = 0
+  for (const s of sorted) {
+    if (s.start > pos) nodes.push(text.slice(pos, s.start))
+    nodes.push(
+      <mark
+        key={`${prefix}-${s.start}`}
+        data-issue-key={s.k}
+        className="cv-mark-amber"
+        ref={(el: HTMLElement | null) => refCb(s.k, el)}
+      >
+        {text.slice(s.start, s.end)}
+      </mark>
+    )
+    pos = s.end
+  }
+  if (pos < text.length) nodes.push(text.slice(pos))
+  return nodes
+}
+
+/**
  * Recursively converts a DOM node to React elements, with mark injection
  * and special handling for Confluence-specific HTML patterns.
  */
@@ -260,6 +383,7 @@ function domToReact(
   c: { n: number },
   currentBlockId?: string,
   hasBlockIds: boolean = true,
+  preResolvedSpans?: BlockSpans,
 ): ReactNode {
   const k = `${c.n++}`
 
@@ -267,6 +391,17 @@ function domToReact(
   if (node.nodeType === Node.TEXT_NODE) {
     const text = node.textContent ?? ""
     if (!text) return null
+
+    // Primary path: block-level spans pre-resolved by resolveBlockMarks.
+    // These cover multi-node matches (e.g. a sentence spanning a <strong>).
+    const blockSpanList = preResolvedSpans?.get(node as Text)
+    if (blockSpanList) {
+      const parts = applySpans(text, blockSpanList, refCb, k)
+      if (parts.length === 1 && typeof parts[0] === "string") return text
+      return <Fragment key={k}>{parts}</Fragment>
+    }
+
+    // Fallback: per-node matching (handles text nodes outside resolved blocks)
     const parts = splitAndMark(text, marks, refCb, k, currentBlockId, hasBlockIds)
     if (parts.length === 1 && typeof parts[0] === "string") return text
     return <Fragment key={k}>{parts}</Fragment>
@@ -285,8 +420,21 @@ function domToReact(
   const elBlockId = el.getAttribute("data-block-id") ?? undefined
   const effectiveBlockId = elBlockId ?? currentBlockId
 
+  // At block boundaries: resolve all applicable marks against the full block text
+  // so multi-node matches (text spanning inline elements) are captured correctly.
+  // For blocks without data-block-id (pre-anchoring content), use BLOCK_TAGS.
+  const isBlockBoundary = elBlockId != null || (!hasBlockIds && BLOCK_TAGS.has(tag))
+  const childSpans: BlockSpans | undefined = isBlockBoundary
+    ? resolveBlockMarks(
+        el,
+        hasBlockIds
+          ? marks.filter(m => !m.blockId || m.blockId === effectiveBlockId)
+          : marks,
+      )
+    : preResolvedSpans  // inline elements inherit parent's resolved spans
+
   const ch = Array.from(el.childNodes)
-    .map(n => domToReact(n, marks, refCb, c, effectiveBlockId, hasBlockIds))
+    .map(n => domToReact(n, marks, refCb, c, effectiveBlockId, hasBlockIds, childSpans))
     .filter((n): n is ReactNode => n != null)
 
   // Helper: include data-block-id on rendered element so the DOM attr exists
@@ -343,7 +491,7 @@ function domToReact(
               }
               return true
             })
-            .map(n => domToReact(n, marks, refCb, c, undefined, hasBlockIds))
+            .map(n => domToReact(n, marks, refCb, c, undefined, hasBlockIds, childSpans))
             .filter((n): n is ReactNode => n != null)
           lines.push(
             <Fragment key={`row-${i}`}>{lineNodes}{"\n"}</Fragment>
