@@ -681,6 +681,7 @@ async def analyze_page(
     message = await client.messages.create(
         model=ANALYSIS_MODEL,
         max_tokens=ANALYSIS_MAX_TOKENS,
+        temperature=0,
         system=system_prompt,
         messages=messages,
     )
@@ -703,6 +704,7 @@ async def analyze_page(
         retry_message = await client.messages.create(
             model=ANALYSIS_MODEL,
             max_tokens=ANALYSIS_MAX_TOKENS,
+            temperature=0,
             system=system_prompt,
             messages=[
                 *messages,

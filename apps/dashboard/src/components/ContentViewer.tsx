@@ -149,12 +149,17 @@ function splitAndMark(
   refCb: (key: string, el: HTMLElement | null) => void,
   prefix: string,
   currentBlockId?: string,
+  hasBlockIds: boolean = true,
 ): ReactNode[] {
   type Span = { start: number; end: number; k: string }
   const spans: Span[] = []
 
-  // Only apply marks that have no block scope, or whose scope matches the current block
-  const applicable = marks.filter(m => !m.blockId || m.blockId === currentBlockId)
+  // When the document carries no data-block-id attributes at all (content synced
+  // before anchoring was deployed), ignore blockId scoping entirely so marks still
+  // match. When block IDs are present, scope precisely to the declared block.
+  const applicable = hasBlockIds
+    ? marks.filter(m => !m.blockId || m.blockId === currentBlockId)
+    : marks
 
   for (const m of applicable) {
     if (!m.text) continue
@@ -254,6 +259,7 @@ function domToReact(
   refCb: (key: string, el: HTMLElement | null) => void,
   c: { n: number },
   currentBlockId?: string,
+  hasBlockIds: boolean = true,
 ): ReactNode {
   const k = `${c.n++}`
 
@@ -261,7 +267,7 @@ function domToReact(
   if (node.nodeType === Node.TEXT_NODE) {
     const text = node.textContent ?? ""
     if (!text) return null
-    const parts = splitAndMark(text, marks, refCb, k, currentBlockId)
+    const parts = splitAndMark(text, marks, refCb, k, currentBlockId, hasBlockIds)
     if (parts.length === 1 && typeof parts[0] === "string") return text
     return <Fragment key={k}>{parts}</Fragment>
   }
@@ -280,7 +286,7 @@ function domToReact(
   const effectiveBlockId = elBlockId ?? currentBlockId
 
   const ch = Array.from(el.childNodes)
-    .map(n => domToReact(n, marks, refCb, c, effectiveBlockId))
+    .map(n => domToReact(n, marks, refCb, c, effectiveBlockId, hasBlockIds))
     .filter((n): n is ReactNode => n != null)
 
   // Helper: include data-block-id on rendered element so the DOM attr exists
@@ -337,7 +343,7 @@ function domToReact(
               }
               return true
             })
-            .map(n => domToReact(n, marks, refCb, c))
+            .map(n => domToReact(n, marks, refCb, c, undefined, hasBlockIds))
             .filter((n): n is ReactNode => n != null)
           lines.push(
             <Fragment key={`row-${i}`}>{lineNodes}{"\n"}</Fragment>
@@ -392,9 +398,21 @@ function parseHtmlToReact(
 ): ReactNode {
   const clean = preprocessConfluenceHtml(html)
   const doc = new DOMParser().parseFromString(clean, "text/html")
+
+  // Detect whether anchoring ran on this content. If no element carries
+  // data-block-id, block-scoped marks fall back to unscoped matching so
+  // highlights still work on pre-anchoring content. Re-sync restores precision.
+  const hasBlockIds = doc.body.querySelector("[data-block-id]") !== null
+  if (!hasBlockIds && marks.some(m => m.blockId)) {
+    console.info(
+      "[ContentViewer] Content has no data-block-id attributes — " +
+      "block-scoped marks will match without scope. Re-sync to restore precise scoping.",
+    )
+  }
+
   const c = { n: 0 }
   const children = Array.from(doc.body.childNodes)
-    .map(n => domToReact(n, marks, refCb, c))
+    .map(n => domToReact(n, marks, refCb, c, undefined, hasBlockIds))
     .filter((n): n is ReactNode => n != null)
   return <>{children}</>
 }
@@ -482,10 +500,10 @@ function AnnotationCard({ issue, phase, created, proposing, active, dismissed, d
 
 // ── Connector SVG ──────────────────────────────────────────────────────────
 
-function ConnectorSvg({ lines, height }: { lines: ConnectorLine[]; height: number }) {
-  if (lines.length === 0 || height === 0) return null
+function ConnectorSvg({ lines }: { lines: ConnectorLine[] }) {
+  if (lines.length === 0) return null
   return (
-    <svg className="cv-connectors" style={{ height }} aria-hidden="true">
+    <svg className="cv-connectors" aria-hidden="true">
       {lines.map(c => {
         const mx = c.x1 + (c.x2 - c.x1) * 0.5
         return (
@@ -542,12 +560,10 @@ export default function ContentViewer({
   onNavigateToProposals,
 }: ContentViewerProps) {
   // ── Refs ──────────────────────────────────────────────────────────────
-  const columnsRef  = useRef<HTMLDivElement>(null)
-  const leftColRef  = useRef<HTMLDivElement>(null)
-  const rightColRef = useRef<HTMLDivElement>(null)
-  const markRefs    = useRef<Map<string, HTMLElement>>(new Map())
-  const cardRefs    = useRef<Map<string, HTMLDivElement>>(new Map())
-  const toastTimer  = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const columnsRef = useRef<HTMLDivElement>(null)
+  const markRefs   = useRef<Map<string, HTMLElement>>(new Map())
+  const cardRefs   = useRef<Map<string, HTMLDivElement>>(new Map())
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Stable ref callback — markRefs.current is always the same Map
   const markRefCb = useCallback((key: string, el: HTMLElement | null) => {
@@ -580,10 +596,7 @@ export default function ContentViewer({
   const [toast,            setToast]            = useState<string | null>(null)
   const [dismissedKeys,    setDismissedKeys]    = useState<Set<string>>(new Set())
   const [dismissingKey,    setDismissingKey]    = useState<string | null>(null)
-  const [svgData,          setSvgData]          = useState<{ lines: ConnectorLine[]; height: number }>({
-    lines: [],
-    height: 0,
-  })
+  const [svgData,          setSvgData]          = useState<ConnectorLine[]>([])
 
   // ── Toast helper ──────────────────────────────────────────────────────
   function showToast(msg: string) {
@@ -602,108 +615,44 @@ export default function ContentViewer({
     [issues]
   )
 
-  // ── Layout: position cards + draw connectors ─────────────────────────
-  const calculatePositions = useCallback(() => {
-    if (!columnsRef.current || !rightColRef.current || !leftColRef.current) return
-
+  // ── Active connector (Option B: one line for the active card only) ───
+  // Cards are in normal flow — no absolute positioning needed. When the user
+  // activates a card we draw a single bezier from its mark to the card.
+  const updateConnector = useCallback(() => {
+    if (!activeKey || !columnsRef.current) {
+      setSvgData([])
+      return
+    }
     const containerRect = columnsRef.current.getBoundingClientRect()
-
-    // 1. Compute desired top for each card
-    type Entry = { key: string; desiredTop: number }
-    const entries: Entry[] = []
-
-    for (const ann of annotations) {
-      const markEl = markRefs.current.get(ann.key) ?? null
-      if (markEl) {
-        const markRect = markEl.getBoundingClientRect()
-        entries.push({ key: ann.key, desiredTop: markRect.top - containerRect.top })
-      } else {
-        // Warn when a text-issue with exactContent has no matching highlight in the DOM
-        if (ann.issue.type === "text-issue" && ann.issue.exactContent) {
-          console.warn(
-            `[ContentViewer] No highlight found for issue "${ann.issue.id ?? ann.issue.title}" — exactContent did not match any text in the rendered document`
-          )
-        }
-        entries.push({ key: ann.key, desiredTop: 12 })
-      }
+    const markEl = markRefs.current.get(activeKey)
+    const cardEl = cardRefs.current.get(activeKey)
+    if (!markEl || !cardEl) {
+      setSvgData([])
+      return
     }
+    const markRect = markEl.getBoundingClientRect()
+    const cardRect = cardEl.getBoundingClientRect()
+    const ann = annotations.find(a => a.key === activeKey)
+    setSvgData([{
+      key: activeKey,
+      x1: markRect.right  - containerRect.left,
+      y1: markRect.top    - containerRect.top + markRect.height / 2,
+      x2: cardRect.left   - containerRect.left,
+      y2: cardRect.top    - containerRect.top + cardRect.height  / 2,
+      severity: ann?.issue.severity ?? "low",
+    }])
+  }, [activeKey, annotations])
 
-    // 2. Sort by document position, then resolve overlaps
-    entries.sort((a, b) => a.desiredTop - b.desiredTop)
-
-    let lastBottom = 0
-    for (const { key, desiredTop } of entries) {
-      const actual = Math.max(desiredTop, lastBottom + 8)
-      const card = cardRefs.current.get(key)
-      if (card) {
-        card.style.top = `${actual}px`
-        lastBottom = actual + card.offsetHeight
-      }
-    }
-
-    // 3. Set right column min-height
-    const contentHeight = Math.max(leftColRef.current.scrollHeight, lastBottom + 20)
-    rightColRef.current.style.minHeight = `${contentHeight}px`
-
-    // 4. Draw connectors — for all text-issues that have both a mark and a card in the DOM
-    const newLines: ConnectorLine[] = []
-    for (const ann of annotations) {
-      if (ann.issue.type === "general-issue") continue  // never render arrows for general-issue
-      const markEl = markRefs.current.get(ann.key)
-      const cardEl = cardRefs.current.get(ann.key)
-      if (!markEl) {
-        if (ann.issue.type === "text-issue" && ann.issue.exactContent) {
-          console.warn(`[ContentViewer] No highlight found for issue "${ann.issue.id ?? ann.issue.title}"`)
-        }
-        continue
-      }
-      if (!cardEl) continue
-
-      // Use container-relative coordinates — no viewport visibility check
-      const markRect = markEl.getBoundingClientRect()
-      const cardRect = cardEl.getBoundingClientRect()
-      newLines.push({
-        key: ann.key,
-        x1: markRect.right  - containerRect.left,
-        y1: markRect.top    - containerRect.top + markRect.height / 2,
-        x2: cardRect.left   - containerRect.left,
-        y2: cardRect.top    - containerRect.top + cardRect.height  / 2,
-        severity: ann.issue.severity,
-      })
-    }
-
-    setSvgData({ lines: newLines, height: contentHeight })
-  }, [annotations])
-
-  // 150ms delay ensures mark refs are fully populated before calculating positions.
   useEffect(() => {
-    const t = setTimeout(calculatePositions, 150)
+    const t = setTimeout(updateConnector, 50)
     return () => clearTimeout(t)
-  }, [calculatePositions])
+  }, [updateConnector])
 
   useEffect(() => {
-    const ro = new ResizeObserver(calculatePositions)
+    const ro = new ResizeObserver(updateConnector)
     if (columnsRef.current) ro.observe(columnsRef.current)
     return () => ro.disconnect()
-  }, [calculatePositions])
-
-  // Scroll on the center content panel only — not the whole window
-  useEffect(() => {
-    const leftEl = leftColRef.current
-    if (leftEl) leftEl.addEventListener("scroll", calculatePositions, { passive: true })
-    return () => {
-      if (leftEl) leftEl.removeEventListener("scroll", calculatePositions)
-    }
-  }, [calculatePositions])
-
-  // MutationObserver: recalculate when the content DOM changes (e.g. after analysis renders)
-  useEffect(() => {
-    const leftEl = leftColRef.current
-    if (!leftEl) return
-    const mo = new MutationObserver(calculatePositions)
-    mo.observe(leftEl, { childList: true, subtree: true })
-    return () => mo.disconnect()
-  }, [calculatePositions])
+  }, [updateConnector])
 
   // ── Handlers ──────────────────────────────────────────────────────────
   async function handlePropose(issue: Issue) {
@@ -858,17 +807,17 @@ export default function ContentViewer({
       {/* Two-column area */}
       <div className="cv-columns" ref={columnsRef}>
 
-        <ConnectorSvg lines={svgData.lines} height={svgData.height} />
+        <ConnectorSvg lines={svgData} />
 
         {/* Left: document with inline amber marks */}
-        <div className="cv-left" ref={leftColRef}>
+        <div className="cv-left">
           {renderedContent}
         </div>
 
-        {/* Right: annotation cards grouped by phase (absolutely positioned) */}
+        {/* Right: annotation cards grouped by phase — normal flow (Option B) */}
         <div className="cv-right-panel">
           <div className="cv-right-header">Issues</div>
-          <div className="cv-right" ref={rightColRef}>
+          <div className="cv-right">
             {(() => {
               // Group annotations by phase; unknown phases fall into "other"
               const groups = new Map<PhaseKey, typeof annotations>()
@@ -879,9 +828,6 @@ export default function ContentViewer({
                 groups.get(key)!.push(ann)
               }
 
-              // Each non-empty phase gets a container div (no position:relative so
-              // absolutely-positioned cards stay anchored to cv-right — connector
-              // and overlap math unchanged).
               return PHASE_ORDER.flatMap(phase => {
                 const group = groups.get(phase)!
                 if (group.length === 0) return []
