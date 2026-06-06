@@ -183,6 +183,13 @@ MIGRATIONS = [
         ]
     ),
     (
+        '009_space_homepage_id',
+        'Add homepage_id to spaces for tree deduplication',
+        [
+            "ALTER TABLE spaces ADD COLUMN IF NOT EXISTS homepage_id VARCHAR",
+        ]
+    ),
+    (
         '008_chunk_space_name',
         'Add space_name to page_chunks for better retrieval',
         [

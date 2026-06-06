@@ -24,10 +24,23 @@ class ConfluenceService:
             response = await client.get(
                 f"{self.base_url}/wiki/rest/api/space",
                 auth=self._auth,
+                params={"expand": "homepage"},  # makes homepage.id available per space
                 headers={"Accept": "application/json"},
             )
             response.raise_for_status()
-            return response.json().get("results", [])
+            results = response.json().get("results", [])
+
+        # Attach a normalised homepage_id key to each result so callers don't need
+        # to know the exact field name (v1 uses homepage.id, v2 uses homepageId).
+        for r in results:
+            homepage_obj = r.get("homepage") or {}
+            raw_id = (
+                homepage_obj.get("id")        # v1 with expand=homepage → "98765432"
+                or r.get("homepageId")         # v2 spaces endpoint
+            )
+            r["homepage_id"] = str(raw_id) if raw_id else None
+
+        return results
 
     async def get_pages_in_space(
         self, space_key: str, limit: int = 100, start: int = 0

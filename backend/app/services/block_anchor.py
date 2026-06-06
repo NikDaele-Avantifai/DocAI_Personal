@@ -61,9 +61,45 @@ class AnchoredDoc:
 
 # ── Internals ──────────────────────────────────────────────────────────────────
 
+def _gather_text(node: etree._Element, out: list[str]) -> None:
+    """
+    Recursively collect text nodes with proper boundary handling:
+    - <br> elements produce a space separator (matching browser line-break rendering)
+    - A space is inserted around each element's content so words cannot merge
+      across tag boundaries (e.g. "and<strong>request</strong>" → "and request").
+    Extra spaces are collapsed by the caller via re.sub(r"\\s+", " ", ...).
+    """
+    if not isinstance(node.tag, str):
+        return
+    tag = node.tag.lower()
+    if tag == "br":
+        out.append(" ")
+        return
+    # Surround element content with spaces — collapsed away if already present,
+    # but prevents word-merging when the HTML author omits boundary whitespace.
+    out.append(" ")
+    if node.text:
+        out.append(node.text)
+    for child in node:
+        _gather_text(child, out)
+        if child.tail:
+            out.append(child.tail)
+    out.append(" ")
+
+
 def _normalize_text(el: etree._Element) -> str:
-    raw = el.text_content()
-    return re.sub(r"\s+", " ", raw).strip()
+    """
+    Extract block text matching browser textContent semantics:
+    - <br> becomes a space separator (not silence)
+    - spaces at element boundaries prevent word-merging across tags
+    - whitespace runs collapse to a single space; result is trimmed
+
+    Contract: block.text == collapse_ws(DOMParser.parseFromString(blockHtml)
+              .body.textContent) — the same string the frontend searches with indexOf.
+    """
+    parts: list[str] = []
+    _gather_text(el, parts)
+    return re.sub(r"\s+", " ", "".join(parts)).strip()
 
 
 def _has_addressable_descendant(el: etree._Element) -> bool:

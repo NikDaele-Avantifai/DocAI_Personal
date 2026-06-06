@@ -210,6 +210,51 @@
     color: var(--text-3);
   }
 
+  /* ── Paced phase stepper ── */
+  .analysis-stepper {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .analysis-stepper-step {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    border-radius: var(--radius-full);
+    font-size: 12px;
+    font-weight: 500;
+    transition: color 0.2s, background 0.2s;
+  }
+
+  .analysis-stepper-step.done {
+    color: var(--green-text);
+    background: var(--green-bg);
+  }
+
+  .analysis-stepper-step.active {
+    color: var(--text-1);
+    background: var(--accent-light);
+    font-weight: 600;
+  }
+
+  .analysis-stepper-step.pending {
+    color: var(--text-4);
+    background: transparent;
+  }
+
+  .analysis-stepper-icon {
+    font-size: 11px;
+    width: 12px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+
+  .analysis-stepper-label {
+    white-space: nowrap;
+  }
+
   /* ── Pre-analysis state ── */
   .detail-pre-analysis {
     padding: 24px;

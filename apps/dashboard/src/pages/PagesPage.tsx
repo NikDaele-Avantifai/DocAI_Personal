@@ -76,6 +76,36 @@ export default function PagesPage() {
 
   const prevAnalyzingRef = useRef(false)
 
+  // ── Paced analysis stepper (Part B) ───────────────────────────────────────
+  const STEPPER_PHASES = ["Structure", "Content", "Compliance", "Hygiene"] as const
+  const [phaseStep, setPhaseStep] = useState(0)
+  const stepperRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  function startStepper() {
+    setPhaseStep(0)
+    if (stepperRef.current) clearInterval(stepperRef.current)
+    stepperRef.current = setInterval(() => {
+      setPhaseStep(prev => {
+        // Hold on the last phase — never loop back
+        if (prev >= STEPPER_PHASES.length - 1) return prev
+        return prev + 1
+      })
+    }, 820)
+  }
+
+  function stopStepper() {
+    if (stepperRef.current) {
+      clearInterval(stepperRef.current)
+      stepperRef.current = null
+    }
+    setPhaseStep(0)
+  }
+
+  // Clean up interval on unmount
+  useEffect(() => {
+    return () => { if (stepperRef.current) clearInterval(stepperRef.current) }
+  }, [])
+
   // Sweep flags (page id → string[] of issue categories)
   const [sweepPageFlags, setSweepPageFlags] = useState<Record<string, string[]>>({})
 
@@ -143,6 +173,7 @@ export default function PagesPage() {
     setAnalyses(prev => { const n = { ...prev }; delete n[pageId]; return n })
     setAnalyzingId(pageId)
     setAnalyzeError(null)
+    startStepper()
 
     try {
       const pageData = await apiClient.get(`/api/sync/pages/${pageId}`).then(r => r.data)
@@ -168,6 +199,7 @@ export default function PagesPage() {
       setAnalyzeError(e instanceof Error ? e.message : "Analysis failed")
     } finally {
       setAnalyzingId(null)
+      stopStepper()
     }
   }
 
@@ -480,8 +512,23 @@ export default function PagesPage() {
                 <div className="detail-analyzing-state">
                   <span className="spinner-lg" />
                   <div className="detail-analyzing-label">Analyzing with DocAI…</div>
-                  <div className="detail-analyzing-sub">
-                    Structure · Content · Compliance · Hygiene
+                  <div className="analysis-stepper">
+                    {STEPPER_PHASES.map((phase, i) => {
+                      const isDone    = i < phaseStep
+                      const isActive  = i === phaseStep
+                      const isHolding = isActive && i === STEPPER_PHASES.length - 1
+                      return (
+                        <div
+                          key={phase}
+                          className={`analysis-stepper-step${isDone ? " done" : isActive ? " active" : " pending"}`}
+                        >
+                          <span className="analysis-stepper-icon">
+                            {isDone ? "✓" : isHolding ? "…" : "·"}
+                          </span>
+                          <span className="analysis-stepper-label">{phase}</span>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
 

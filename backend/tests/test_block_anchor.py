@@ -171,6 +171,54 @@ class TestAnchorHtml:
         assert "div" not in tags_with_id
         assert "ul" not in tags_with_id
 
+    # ── Whitespace / boundary tests (Layer 1 fix) ─────────────────────────────
+
+    def test_inline_element_boundary_preserves_space(self):
+        """
+        Adjacent inline elements must not merge words across tag boundaries.
+        "and <strong>request</strong>" must yield "and request", never "andrequest".
+        This matches browser textContent behaviour after whitespace-collapsing.
+        """
+        html = "<p>Please submit and<strong>request</strong> the form</p>"
+        doc = anchor_html(html)
+        assert len(doc.blocks) == 1
+        text = doc.blocks[0].text
+        # The word boundary between "and" and "request" must be preserved
+        assert "andrequest" not in text
+        assert "and request" in text
+        assert text == "Please submit and request the form"
+
+    def test_br_produces_space_separator(self):
+        """
+        <br> must produce a separator so adjacent lines don't concatenate.
+        "Last Updated: January 2025<br/>Status: Current" must NOT yield
+        "January 2025Status: Current".
+        """
+        html = "<p>Last Updated: January 2025<br/>Status: Current</p>"
+        doc = anchor_html(html)
+        assert len(doc.blocks) == 1
+        text = doc.blocks[0].text
+        # Words must be separated, not concatenated across the <br>
+        assert "2025Status" not in text
+        assert "January 2025" in text
+        assert "Status: Current" in text
+
+    def test_known_fixture_dom_equivalent_text(self):
+        """
+        For a representative Confluence paragraph, block.text must equal what
+        DOMParser().parseFromString(html).body.textContent with whitespace
+        collapsed would return — the contract that makes exactContent match the DOM.
+        """
+        html = "<p>Federal Government employees and<em>contractors</em> may request leave.</p>"
+        doc = anchor_html(html)
+        assert len(doc.blocks) == 1
+        text = doc.blocks[0].text
+        # Must have space before "contractors" (element boundary)
+        assert "andcontractors" not in text
+        assert "and contractors" in text
+        # Full expected text after whitespace normalization
+        assert text == "Federal Government employees and contractors may request leave."
+
 
 # ── Step 3b: block-level replacement helper ───────────────────────────────────
 # Tests for the _replace_in_element logic used in edit.py snippet mode.

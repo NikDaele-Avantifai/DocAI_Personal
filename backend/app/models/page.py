@@ -22,6 +22,7 @@ class Space(Base):
     last_synced: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    homepage_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class Page(Base):

@@ -98,6 +98,31 @@ const ACTION_BTNS = [
   { type: "remove_section", label: "Remove Section" },
 ] as const
 
+// ── Whitespace utilities ───────────────────────────────────────────────────
+
+/**
+ * Collapse whitespace runs in `s` to single spaces, building a map from each
+ * position in the collapsed string back to the corresponding position in the
+ * original. Used by splitAndMark's whitespace-tolerant fallback.
+ */
+function collapseWs(s: string): { collapsed: string; map: number[] } {
+  const map: number[] = []
+  let result = ""
+  let i = 0
+  while (i < s.length) {
+    if (/\s/.test(s[i])) {
+      map.push(i)
+      result += " "
+      while (i < s.length && /\s/.test(s[i])) i++
+    } else {
+      map.push(i)
+      result += s[i]
+      i++
+    }
+  }
+  return { collapsed: result, map }
+}
+
 // ── HTML pre-processing ────────────────────────────────────────────────────
 
 /**
@@ -133,14 +158,52 @@ function splitAndMark(
 
   for (const m of applicable) {
     if (!m.text) continue
-    // Exact match first, then NBSP-normalised fallback
-    let idx = text.indexOf(m.text)
-    if (idx === -1) {
-      const norm = (s: string) => s.replace(/\u00A0/g, " ")
-      idx = norm(text).indexOf(norm(m.text))
+
+    let spanStart = -1
+    let spanEnd   = -1
+
+    // 1. Exact match (fast path)
+    const exactIdx = text.indexOf(m.text)
+    if (exactIdx !== -1) {
+      spanStart = exactIdx
+      spanEnd   = exactIdx + m.text.length
     }
-    if (idx !== -1 && !spans.some(s => idx < s.end && idx + m.text.length > s.start)) {
-      spans.push({ start: idx, end: idx + m.text.length, k: m.key })
+
+    // 2. NBSP-normalised fallback
+    if (spanStart === -1) {
+      const norm = (s: string) => s.replace(/\u00A0/g, " ")
+      const normIdx = norm(text).indexOf(norm(m.text))
+      if (normIdx !== -1) {
+        spanStart = normIdx
+        spanEnd   = normIdx + m.text.length
+      }
+    }
+
+    // 3. Whitespace-collapsed fallback \u2014 safety net for backend/DOM text divergence.
+    //    Collapse \s+ runs to a single space in both haystack and needle, find the
+    //    match, then map collapsed offsets back to the original string so the <mark>
+    //    wraps the correct original characters.
+    if (spanStart === -1) {
+      const { collapsed, map } = collapseWs(text)
+      const needle = m.text.replace(/\s+/g, " ")
+      const colIdx = collapsed.indexOf(needle)
+      if (colIdx !== -1) {
+        spanStart = map[colIdx]
+        const colEnd = colIdx + needle.length
+        spanEnd = colEnd < map.length ? map[colEnd] : text.length
+      }
+    }
+
+    if (spanStart === -1) {
+      console.warn(
+        `[splitAndMark] No match for mark text (all three strategies failed):`,
+        JSON.stringify(m.text.slice(0, 80)),
+      )
+      continue
+    }
+
+    if (!spans.some(s => spanStart < s.end && spanEnd > s.start)) {
+      spans.push({ start: spanStart, end: spanEnd, k: m.key })
     }
   }
 
@@ -340,6 +403,7 @@ function parseHtmlToReact(
 
 interface AnnotationCardProps {
   issue: Issue
+  phase: PhaseKey
   created: boolean
   proposing: boolean
   active: boolean
@@ -351,7 +415,7 @@ interface AnnotationCardProps {
   onDismiss: (e: React.MouseEvent) => void
 }
 
-function AnnotationCard({ issue, created, proposing, active, dismissed, dismissing, cardRef, onClick, onPropose, onDismiss }: AnnotationCardProps) {
+function AnnotationCard({ issue, phase, created, proposing, active, dismissed, dismissing, cardRef, onClick, onPropose, onDismiss }: AnnotationCardProps) {
   const needsHuman  = issueNeedsHuman(issue)
   const color       = needsHuman ? "var(--border)" : (SEV_COLOR[issue.severity] ?? SEV_COLOR.low)
   const label       = SEV_LABEL[issue.severity] ?? "Low"
@@ -371,6 +435,7 @@ function AnnotationCard({ issue, created, proposing, active, dismissed, dismissi
         }
         <span className="cv-sev-label" style={needsHuman ? { color: "var(--text-3)" } : {}}>{label}</span>
         <span className="cv-card-title">{issue.title}</span>
+        <span className="cv-card-phase-badge">{PHASE_LABELS[phase]}</span>
       </div>
       <div className="cv-card-body">
         {shortQuote && <div className="cv-card-quote">"{shortQuote}"</div>}
@@ -814,32 +879,38 @@ export default function ContentViewer({
                 groups.get(key)!.push(ann)
               }
 
+              // Each non-empty phase gets a container div (no position:relative so
+              // absolutely-positioned cards stay anchored to cv-right — connector
+              // and overlap math unchanged).
               return PHASE_ORDER.flatMap(phase => {
                 const group = groups.get(phase)!
                 if (group.length === 0) return []
                 return [
-                  <div key={`ph-${phase}`} className="cv-phase-header">
-                    <span className="cv-phase-label">{PHASE_LABELS[phase]}</span>
-                    <span className="cv-phase-count">{group.length}</span>
+                  <div key={`ph-${phase}`} className="cv-phase-group">
+                    <div className="cv-phase-header">
+                      <span className="cv-phase-label">{PHASE_LABELS[phase]}</span>
+                      <span className="cv-count cv-phase-count-badge">{group.length}</span>
+                    </div>
+                    {group.map(({ key: k, issue }) => (
+                      <AnnotationCard
+                        key={k}
+                        issue={issue}
+                        phase={phase}
+                        created={createdProposals.has(k)}
+                        proposing={proposingKey === k}
+                        active={activeKey === k}
+                        dismissed={dismissedKeys.has(k)}
+                        dismissing={dismissingKey === k}
+                        cardRef={el => {
+                          if (el) cardRefs.current.set(k, el)
+                          else    cardRefs.current.delete(k)
+                        }}
+                        onClick={() => setActiveKey(k === activeKey ? null : k)}
+                        onPropose={e => { e.stopPropagation(); handlePropose(issue) }}
+                        onDismiss={e => { e.stopPropagation(); handleDismiss(issue) }}
+                      />
+                    ))}
                   </div>,
-                  ...group.map(({ key: k, issue }) => (
-                    <AnnotationCard
-                      key={k}
-                      issue={issue}
-                      created={createdProposals.has(k)}
-                      proposing={proposingKey === k}
-                      active={activeKey === k}
-                      dismissed={dismissedKeys.has(k)}
-                      dismissing={dismissingKey === k}
-                      cardRef={el => {
-                        if (el) cardRefs.current.set(k, el)
-                        else    cardRefs.current.delete(k)
-                      }}
-                      onClick={() => setActiveKey(k === activeKey ? null : k)}
-                      onPropose={e => { e.stopPropagation(); handlePropose(issue) }}
-                      onDismiss={e => { e.stopPropagation(); handleDismiss(issue) }}
-                    />
-                  )),
                 ]
               })
             })()}

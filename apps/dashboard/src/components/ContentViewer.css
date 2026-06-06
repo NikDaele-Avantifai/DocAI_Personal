@@ -733,35 +733,62 @@ mark.cv-mark-amber {
   margin: var(--space-5) 0;
 }
 
-/* ── Phase group headers in the annotation panel ──────────── */
+/* ── Phase group containers in the annotation panel ─────────── */
+
+/* Non-positioned wrapper — cards inside remain absolute relative to
+   cv-right; this container only visually presents the phase header. */
+.cv-phase-group {
+  margin: 8px 8px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-white);
+  overflow: visible; /* absolute children escape — intentional */
+}
+
+.cv-phase-group + .cv-phase-group {
+  margin-top: 6px;
+}
 
 .cv-phase-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 10px 14px 4px;
-  border-top: 1px solid var(--border);
-}
-
-.cv-phase-header:first-child {
-  border-top: none;
-  padding-top: 4px;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  border-bottom: 1px solid var(--border);
 }
 
 .cv-phase-label {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
-  color: var(--text-3);
+  color: var(--text-2);
   text-transform: uppercase;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.06em;
   flex: 1;
 }
 
-.cv-phase-count {
-  font-size: 10px;
+/* Reuses cv-count vocabulary — plain numeric badge */
+.cv-phase-count-badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-3);
+  background: var(--surface-3);
+  border-radius: var(--radius-full);
+  padding: 1px 7px;
+  min-width: 20px;
+  text-align: center;
+}
+
+/* ── Phase badge on each card ────────────────────────────────── */
+
+.cv-card-phase-badge {
+  font-size: 9.5px;
   font-weight: 600;
   color: var(--text-4);
-  background: var(--surface-3);
-  border-radius: 99px;
-  padding: 1px 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-left: auto;
+  white-space: nowrap;
+  flex-shrink: 0;
 }

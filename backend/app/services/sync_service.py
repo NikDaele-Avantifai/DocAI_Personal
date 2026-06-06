@@ -52,6 +52,32 @@ def _extract_last_modified(page: dict[str, Any]) -> str | None:
         return None
 
 
+def _hoist_homepage(roots: list[dict[str, Any]], homepage_id: str | None) -> list[dict[str, Any]]:
+    """
+    If a root node's id matches homepage_id, replace it with its children
+    (splice them into the position the homepage occupied).
+
+    Rules:
+    - Returns roots unchanged when homepage_id is None or not found at root level.
+    - If hoisting would produce an empty list but roots was non-empty, returns roots
+      unchanged — prefer showing the homepage over an empty tree.
+    - Drops the homepage node even when it has no children (removes a duplicate
+      empty node), unless that would produce an empty tree.
+    """
+    if not homepage_id:
+        return roots
+
+    for i, node in enumerate(roots):
+        if str(node.get("id", "")) == str(homepage_id):
+            children: list[dict[str, Any]] = node.get("children", [])
+            hoisted = roots[:i] + children + roots[i + 1:]
+            if not hoisted and roots:
+                return roots  # never return empty when content exists
+            return hoisted
+
+    return roots
+
+
 def _build_tree(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Convert a flat list of page dicts into a nested children tree."""
     page_map: dict[str, dict[str, Any]] = {}
@@ -121,6 +147,8 @@ class SyncService:
         space_name = _space_raw.get("name", space_key)
         webui = _space_raw.get("_links", {}).get("webui", f"/spaces/{space_key}")
         space_url = f"{self.confluence.base_url}/wiki{webui}"
+        # homepage_id is injected by confluence_service.get_spaces() via expand=homepage
+        homepage_id: str | None = _space_raw.get("homepage_id")
 
         # ── 2. Fetch all pages + folders ──────────────────────────────────
         raw_pages = await self.confluence.get_all_pages_in_space(space_key)
@@ -137,6 +165,7 @@ class SyncService:
             url=space_url,
             page_count=len(raw_pages),
             last_synced=now,
+            homepage_id=homepage_id,
         )
         stmt = stmt.on_conflict_do_update(
             constraint="uq_spaces_workspace_key",
@@ -145,6 +174,7 @@ class SyncService:
                 "url": space_url,
                 "page_count": len(raw_pages),
                 "last_synced": now,
+                "homepage_id": homepage_id,
             },
         )
         await self.session.execute(stmt)
@@ -299,7 +329,20 @@ class SyncService:
             }
             for p in pages
         ]
-        return _build_tree(flat)
+        roots = _build_tree(flat)
+
+        # Step 3: hoist homepage children to remove the duplicate same-named root node.
+        # homepage_id comes from Confluence space metadata (never title-matched).
+        space_row = (await self.session.execute(
+            select(Space).where(
+                Space.key == space_key,
+                Space.workspace_id == self.workspace_id,
+            )
+        )).scalar_one_or_none()
+        homepage_id = space_row.homepage_id if space_row else None
+        roots = _hoist_homepage(roots, homepage_id)
+
+        return roots
 
     async def get_page_with_content(
         self,
